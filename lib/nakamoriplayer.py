@@ -15,11 +15,12 @@ def sync_resume(file_id, current_time):
         nt.sync_offset(file_id, current_time)
 
 
-def trakt(ep_id, status, current_time, total_time, movie):
+def trakt(ep_id, status, current_time, total_time, movie, show_notification):
     if nt.addon.getSetting("trakt_scrobble") == "true":
         notification = False
-        if nt.addon.getSetting("trakt_scrobble_notification") == "true":
-            notification = True
+        if show_notification:
+            if nt.addon.getSetting("trakt_scrobble_notification") == "true":
+                notification = True
         progress = int((current_time / total_time) * 100)
         nt.trakt_scrobble(ep_id, status, progress, movie, notification)
 
@@ -54,7 +55,8 @@ class Service(xbmc.Player):
             'shoko:epid': '',
             'shoko:movie': '',
             'shoko:duration': 0,
-            'shoko:userrate': '0.0'
+            'shoko:userrate': '0.0',
+            'shoko:traktonce': False
         }
         self.CanControl = True
         log('finish init')
@@ -83,13 +85,14 @@ class Service(xbmc.Player):
         self.Metadata['shoko:epid'] = self._details['epid']
         self.Metadata['shoko:movie'] = self._details['movie']
         self.Metadata['shoko:fileid'] = self._details['fileid']
+        self.Metadata['shoko:traktonce'] = True
 
         self.PlaybackStatus = 'Playing'
         duration = self.getTotalTime()
         if self.Transcoded:
             duration = self.Metadata.get('shoko:duration')
-        trakt(self.Metadata.get('shoko:epid'), 1, 0, duration, self.Metadata.get('shoko:movie'))
-
+        trakt(self.Metadata.get('shoko:epid'), 1, 0, duration, self.Metadata.get('shoko:movie'),
+              self.Metadata.get('shoko:traktonce'))
         self.onPlayBackResumed()
 
     def onPlayBackStopped(self):
@@ -97,6 +100,7 @@ class Service(xbmc.Player):
 
     def onPlayBackEnded(self):
         # TODO userrate
+        self.Metadata['shoko:traktonce'] = True
         did_i_watch_entire_episode(self.Metadata.get('shoko:current'), self.Metadata.get('shoko:duration'),
                                    self.Metadata.get('shoko:epid'), '0.0')
         trakt(self.Metadata.get('shoko:epid'), 3, self.Metadata.get('shoko:current'),
@@ -105,16 +109,19 @@ class Service(xbmc.Player):
         self.PlaybackStatus = 'Stopped'
 
     def onPlayBackPaused(self):
+        self.Metadata['shoko:traktonce'] = True
         trakt(self.Metadata.get('shoko:epid'), 2, self.Metadata.get('shoko:current'),
               self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'))
         self.PlaybackStatus = 'Paused'
 
     def onPlayBackResumed(self):
         self.PlaybackStatus = 'Playing'
+        self.Metadata['shoko:traktonce'] = True
         while self.isPlayingVideo():
             self.Metadata['shoko:current'] = self.getTime()
-            trakt(self.Metadata.get('shoko:epid'), 1, self.getTime(),
+            trakt(self.Metadata.get('shoko:epid'), 1, self.Metadata.get('shoko:current'),
                   self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'))
+            self.Metadata['shoko:traktonce'] = False
             time.sleep(3)
         else:
             log("not playing anything")
