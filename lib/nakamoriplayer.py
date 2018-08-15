@@ -2,12 +2,13 @@
 import xbmc
 import time
 import nakamoritools as nt
+from threading import Thread
 
 Playback_Status = ["Playing", "Paused", "Stopped"]
 
 
 def log(msg):
-    xbmc.log("nakamori.player::%s" % msg, level=xbmc.LOGNOTICE)
+    xbmc.log("-> nakamori.player::%s" % msg, level=xbmc.LOGNOTICE)
 
 
 def sync_resume(file_id, current_time):
@@ -29,21 +30,20 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
     mark = float(nt.addon.getSetting("watched_mark"))
     mark /= 100
     if (total_time * mark) < current_time:
-        file_fin = True  # po co
-
         if nt.addon.getSetting('vote_always') == 'true':
             # convert in case shoko give float
             if user_rate == '0.0':
                 nt.vote_episode(ep_id)
             else:
-                xbmc.log("------- vote_always found 'userrate':" + str(user_rate),
-                         xbmc.LOGNOTICE)
+                log("vote_always found 'userrate' %s" % user_rate)
 
 
 class Service(xbmc.Player):
     def __init__(self):
         log('Init')
         xbmc.Player.__init__(self)
+        self._t = None  # trakt thread
+        self._s = None  # sync thread
         self._details = None
         self.Playlist = None
         self.PlaybackStatus = 'Stopped'
@@ -56,10 +56,11 @@ class Service(xbmc.Player):
             'shoko:movie': '',
             'shoko:duration': 0,
             'shoko:userrate': '0.0',
-            'shoko:traktonce': False
+            'shoko:traktonce': False,
+            'shoko:rawid': '',
+            'shoko:path': ''
         }
         self.CanControl = True
-        log('finish init')
         if self.isPlaying():
             self.onPlayBackStarted()
 
@@ -67,7 +68,6 @@ class Service(xbmc.Player):
         log('feed')
         self._details = details
 
-    # called when kodi starts playing a file
     def onPlayBackStarted(self):
         log('onPlaybackStarted')
 
@@ -86,6 +86,7 @@ class Service(xbmc.Player):
         self.Metadata['shoko:movie'] = self._details['movie']
         self.Metadata['shoko:fileid'] = self._details['fileid']
         self.Metadata['shoko:traktonce'] = True
+        self.Metadata['shoko:rawid'] = self._details['rawid']
 
         self.PlaybackStatus = 'Playing'
         duration = self.getTotalTime()
@@ -96,35 +97,75 @@ class Service(xbmc.Player):
         self.onPlayBackResumed()
 
     def onPlayBackStopped(self):
+        log('onPlayBackStopped')
         self.onPlayBackEnded()
 
     def onPlayBackEnded(self):
+        log('onPlayBackEnded')
         # TODO userrate
         self.Metadata['shoko:traktonce'] = True
         did_i_watch_entire_episode(self.Metadata.get('shoko:current'), self.Metadata.get('shoko:duration'),
                                    self.Metadata.get('shoko:epid'), '0.0')
         trakt(self.Metadata.get('shoko:epid'), 3, self.Metadata.get('shoko:current'),
               self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
-                  self.Metadata.get('shoko:traktonce'))
+              self.Metadata.get('shoko:traktonce'))
+        if self.Transcoded:
+            nt.get_json(self.Metadata.get('shoko:path') + '/cancel')
+
         self.Playlist = None
         self.PlaybackStatus = 'Stopped'
 
     def onPlayBackPaused(self):
+        log('onPlayBackPaused')
         self.Metadata['shoko:traktonce'] = True
         trakt(self.Metadata.get('shoko:epid'), 2, self.Metadata.get('shoko:current'),
               self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
-                  self.Metadata.get('shoko:traktonce'))
+              self.Metadata.get('shoko:traktonce'))
         self.PlaybackStatus = 'Paused'
 
     def onPlayBackResumed(self):
+        log('onPlayBackResumed')
         self.PlaybackStatus = 'Playing'
         self.Metadata['shoko:traktonce'] = True
+        try:
+            self._t.stop()
+        except:
+            log('no trakt thread to stop')
+        self._t = Thread(target=self.update_trakt, args=())
+        self._t.daemon = True
+        self._t.start()
+        try:
+            self._s.stop()
+        except:
+            log('no sync thread to stop')
+        self._s = Thread(target=self.update_sync, args=())
+        self._s.daemon = True
+        self._s.start()
+
+    def onPlayBackSeek(self, time_to_seek, seek_offset):
+        log('onPlayBackSeek with %s, %s' % (time_to_seek, seek_offset))
+
+    def update_trakt(self):
         while self.isPlayingVideo():
             self.Metadata['shoko:current'] = self.getTime()
             trakt(self.Metadata.get('shoko:epid'), 1, self.Metadata.get('shoko:current'),
                   self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
                   self.Metadata.get('shoko:traktonce'))
             self.Metadata['shoko:traktonce'] = False
-            time.sleep(3)
+            time.sleep(5)
         else:
-            log("not playing anything")
+            log("trakt_thread: not playing anything")
+            return
+
+    def update_sync(self):
+        while self.isPlayingVideo():
+            if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
+                self.Metadata['shoko:current'] = self.getTime()
+                # Resume support (work with shoko 3.6.0.7+)
+                # don't sync until the files is playing and more than 10 seconds in
+                # we'll sync the offset if it's set to sync watched states
+                nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
+                time.sleep(3)
+        else:
+            log("sync_thread: not playing anything")
+            return
