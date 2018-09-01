@@ -29,6 +29,7 @@ def trakt(ep_id, status, current_time, total_time, movie, show_notification):
 def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
     mark = float(nt.addon.getSetting("watched_mark"))
     mark /= 100
+    log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
     if (total_time * mark) < current_time:
         if nt.addon.getSetting('vote_always') == 'true':
             # convert in case shoko give float
