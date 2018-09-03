@@ -9,19 +9,17 @@
     </extension>
     <extension point="xbmc.python.module" library="lib" />
     <extension point="xbmc.addon.metadata">
+        <summary lang="en">Nakamori Player Module</summary>
+        <description lang="en">This module handle all the player related functions inside Nakamori</description>
+        <news>v3.0.0 (2018-09-03)
+- initial release
+        </news>
         <platform>all</platform>
-        <summary lang="en">Nakamori Player module</summary>
-        <description lang="en">This module handle all the player related function inside Nakamori</description>
+        <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
         <website>https://shokunin.monogatari.pl/</website>
         <source>http://github.com/bigretromike/nakamori.player</source>
-        <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
-        <news>v3.0.0 (2018-08-08)
-            - initial release
-        </news>
     </extension>
     <assets>
         <icon>resources/icon.png</icon>
-        <fanart>resources/fanart.jpg</fanart>
-        <screenshot></screenshot>
     </assets>
 </addon>
