@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import xbmc
-import xbmcgui
 import time
 import nakamoritools as nt
 from threading import Thread
@@ -28,10 +27,19 @@ def trakt(ep_id, status, current_time, total_time, movie, show_notification):
 
 
 def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
-    mark = float(nt.addon.getSetting("watched_mark"))
-    mark /= 100
-    log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
-    if (total_time * mark) < current_time:
+    _finished = False
+    if nt.addon.getSetting('external_player') == 'false':  # k18-alpha2 self.isExternalPlayer()
+        mark = float(nt.addon.getSetting("watched_mark"))
+        mark /= 100
+        log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
+        if (total_time * mark) < current_time:
+            _finished = True
+    else:
+        # external set position = 1.0 when it want to mark it as watched (based on configuration of external)
+        if current_time > 0.0:
+            _finished = True
+
+    if _finished:
         if nt.addon.getSetting('vote_always') == 'true':
             # convert in case shoko give float
             if user_rate == '0.0':
@@ -120,7 +128,7 @@ class Service(xbmc.Player):
 
     def onPlayBackEnded(self):
         log('onPlayBackEnded')
-        # TODO userrate
+        # TODO userrate support
         self.Metadata['shoko:traktonce'] = True
         did_i_watch_entire_episode(self.Metadata.get('shoko:current'), self.Metadata.get('shoko:duration'),
                                    self.Metadata.get('shoko:epid'), '0.0')
@@ -159,13 +167,13 @@ class Service(xbmc.Player):
 
     def update_sync(self):
         while self.isPlayingVideo():
-            if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
-                self.Metadata['shoko:current'] = self.getTime()
-                # Resume support (work with shoko 3.6.0.7+)
-                # don't sync until the files is playing and more than 10 seconds in
-                # we'll sync the offset if it's set to sync watched states
-                nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
-                time.sleep(3)
+            try:
+                if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
+                    self.Metadata['shoko:current'] = self.getTime()
+                    nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
+                    time.sleep(3)
+            except:
+                pass  # while buffering
         else:
             log("sync_thread: not playing anything")
             return
