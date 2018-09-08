@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.module.nakamoriplayer" name="nakamori-player-module" version="3.0.1" provider-name="BigRetroMike, da3dsoul">
+<addon id="script.module.nakamoriplayer" name="nakamori-player-module" version="3.0.2" provider-name="BigRetroMike, da3dsoul">
     <requires>
         <import addon="xbmc.python" version="2.1.0"/>
-        <import addon="script.module.nakamori" version="3.0.1"/>
+        <import addon="script.module.nakamori" version="3.0.2"/>
     </requires>
     <extension point="xbmc.python.pluginsource">
         <provides></provides>
@@ -11,16 +11,13 @@
     <extension point="xbmc.addon.metadata">
         <summary lang="en">Nakamori Player Module</summary>
         <description lang="en">This module handle all the player related functions inside Nakamori</description>
-        <news>
-3.0.1
-- issue with watch status with external player
-        </news>
+        <news>3.0.2[CR]- metadata fix</news>
         <platform>all</platform>
         <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
         <website>https://shokunin.monogatari.pl/</website>
         <source>http://github.com/bigretromike/nakamori.player</source>
+		<assets>
+            <icon>resources/icon.png</icon>
+        </assets>
     </extension>
-    <assets>
-        <icon>resources/icon.png</icon>
-    </assets>
 </addon>
