@@ -171,7 +171,7 @@ class Service(xbmc.Player):
                 if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
                     self.Metadata['shoko:current'] = self.getTime()
                     nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
-                    time.sleep(3)
+                    time.sleep(1)
             except:
                 pass  # while buffering
         else:
