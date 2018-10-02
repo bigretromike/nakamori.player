@@ -96,6 +96,8 @@ class Service(xbmc.Player):
         self.Metadata['shoko:rawid'] = self._details['rawid']
 
         self.PlaybackStatus = 'Playing'
+        while not self.isPlaying():
+            xbmc.sleep(10)
         duration = self.getTotalTime()
         if self.Transcoded:
             duration = self.Metadata.get('shoko:duration')
