@@ -53,7 +53,7 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
 class Service(xbmc.Player):
     def __init__(self):
         log('Init')
-        # xbmc.Player.__init__(self)
+        xbmc.Player.__init__(self)
         self._t = None  # trakt thread
         self._s = None  # sync thread
         self._details = None
