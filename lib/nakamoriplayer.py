@@ -88,7 +88,7 @@ class Service(xbmc.Player):
         self.Metadata['shoko:current'] = 0
         # if I recall k17 give second * 1000 and k18 give only seconds
         real_duration = int(self._details['duration'])
-        self.Metadata['shoko:duration'] = real_duration if real_duration < 1000000 else real_duration/1000
+        self.Metadata['shoko:duration'] = real_duration/1000  # if real_duration < 1000000 else real_duration/1000
         self.Metadata['shoko:epid'] = self._details['epid']
         self.Metadata['shoko:movie'] = self._details['movie']
         self.Metadata['shoko:fileid'] = self._details['fileid']
