@@ -97,7 +97,7 @@ class Service(xbmc.Player):
 
         self.PlaybackStatus = 'Playing'
         while not self.isPlaying():
-            xbmc.sleep(10)
+            xbmc.sleep(100)
         duration = self.getTotalTime()
         if self.Transcoded:
             duration = self.Metadata.get('shoko:duration')
@@ -162,8 +162,7 @@ class Service(xbmc.Player):
                   self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
                   self.Metadata.get('shoko:traktonce'))
             self.Metadata['shoko:traktonce'] = False
-            # xbmc.sleep uses ms, which would be obvious if you used an IDE
-            xbmc.sleep(5000)
+            xbmc.sleep(1000)
         else:
             log("trakt_thread: not playing anything")
             return
@@ -174,8 +173,7 @@ class Service(xbmc.Player):
                 if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
                     self.Metadata['shoko:current'] = self.getTime()
                     nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
-                    # xbmc.sleep uses ms, which would be obvious if you used an IDE
-                    xbmc.sleep(1000)
+                    xbmc.sleep(100)
             except:
                 pass  # while buffering
         else:
