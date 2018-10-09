@@ -32,7 +32,7 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
         mark = float(nt.addon.getSetting("watched_mark"))
         mark /= 100
         log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
-        if (total_time * mark) < current_time:
+        if (total_time * mark) <= current_time:
             _finished = True
     else:
         # external set position = 1.0 when it want to mark it as watched (based on configuration of external)
@@ -162,7 +162,8 @@ class Service(xbmc.Player):
                   self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
                   self.Metadata.get('shoko:traktonce'))
             self.Metadata['shoko:traktonce'] = False
-            xbmc.sleep(5)
+            # xbmc.sleep uses ms, which would be obvious if you used an IDE
+            xbmc.sleep(5000)
         else:
             log("trakt_thread: not playing anything")
             return
@@ -173,7 +174,8 @@ class Service(xbmc.Player):
                 if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
                     self.Metadata['shoko:current'] = self.getTime()
                     nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
-                    xbmc.sleep(1)
+                    # xbmc.sleep uses ms, which would be obvious if you used an IDE
+                    xbmc.sleep(1000)
             except:
                 pass  # while buffering
         else:
