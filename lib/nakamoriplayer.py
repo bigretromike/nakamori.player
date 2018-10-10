@@ -32,7 +32,7 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
         mark = float(nt.addon.getSetting("watched_mark"))
         mark /= 100
         log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
-        if (total_time * mark) < current_time:
+        if (total_time * mark) <= current_time:
             _finished = True
     else:
         # external set position = 1.0 when it want to mark it as watched (based on configuration of external)
@@ -53,7 +53,7 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
 class Service(xbmc.Player):
     def __init__(self):
         log('Init')
-        # xbmc.Player.__init__(self)
+        xbmc.Player.__init__(self)
         self._t = None  # trakt thread
         self._s = None  # sync thread
         self._details = None
@@ -88,7 +88,7 @@ class Service(xbmc.Player):
         self.Metadata['shoko:current'] = 0
         # if I recall k17 give second * 1000 and k18 give only seconds
         real_duration = int(self._details['duration'])
-        self.Metadata['shoko:duration'] = real_duration if real_duration < 1000000 else real_duration/1000
+        self.Metadata['shoko:duration'] = real_duration/1000  # if real_duration < 1000000 else real_duration/1000
         self.Metadata['shoko:epid'] = self._details['epid']
         self.Metadata['shoko:movie'] = self._details['movie']
         self.Metadata['shoko:fileid'] = self._details['fileid']
@@ -96,6 +96,8 @@ class Service(xbmc.Player):
         self.Metadata['shoko:rawid'] = self._details['rawid']
 
         self.PlaybackStatus = 'Playing'
+        while not self.isPlaying():
+            xbmc.sleep(100)
         duration = self.getTotalTime()
         if self.Transcoded:
             duration = self.Metadata.get('shoko:duration')
@@ -160,7 +162,7 @@ class Service(xbmc.Player):
                   self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
                   self.Metadata.get('shoko:traktonce'))
             self.Metadata['shoko:traktonce'] = False
-            time.sleep(5)
+            xbmc.sleep(1000)
         else:
             log("trakt_thread: not playing anything")
             return
@@ -171,7 +173,7 @@ class Service(xbmc.Player):
                 if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
                     self.Metadata['shoko:current'] = self.getTime()
                     nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
-                    time.sleep(1)
+                    xbmc.sleep(100)
             except:
                 pass  # while buffering
         else:

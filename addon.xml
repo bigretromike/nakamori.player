@@ -11,7 +11,7 @@
     <extension point="xbmc.addon.metadata">
         <summary lang="en">Nakamori Player Module</summary>
         <description lang="en">This module handle all the player related functions inside Nakamori</description>
-        <news>3.0.6[CR]- more frequent sync calling</news>
+        <news>3.0.7[CR]- fix for missing onPlayBackStopped</news>
         <platform>all</platform>
         <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
         <website>https://shokunin.monogatari.pl/</website>
