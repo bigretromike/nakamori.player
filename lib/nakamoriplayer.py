@@ -26,8 +26,9 @@ def trakt(ep_id, status, current_time, total_time, movie, show_notification):
         nt.trakt_scrobble(ep_id, status, progress, movie, notification)
 
 
-def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
+def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate, rawid):
     _finished = False
+
     if nt.addon.getSetting('external_player') == 'false':  # k18-alpha2 self.isExternalPlayer()
         mark = float(nt.addon.getSetting("watched_mark"))
         mark /= 100
@@ -40,14 +41,18 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate):
             _finished = True
 
     if _finished:
-        if nt.addon.getSetting('vote_always') == 'true':
-            # convert in case shoko give float
-            if user_rate == '0.0':
-                nt.vote_episode(ep_id)
-            else:
-                log("vote_always found 'userrate' %s" % user_rate)
-        params = {'ep_id': ep_id, 'watched': True}
-        nt.mark_watch_status(params)
+        if rawid == 0:
+            if nt.addon.getSetting('vote_always') == 'true':
+                # convert in case shoko give float
+                if user_rate == '0.0':
+                    nt.vote_episode(ep_id)
+                else:
+                    log("vote_always found 'userrate' %s" % user_rate)
+            params = {'ep_id': ep_id, 'watched': True}
+            nt.mark_watch_status(params)
+        else:
+            # TODO unsort files vote/watchmark support
+            log('mark = watched but it was unsort file')
 
 
 class Service(xbmc.Player):
@@ -63,13 +68,13 @@ class Service(xbmc.Player):
         self.Shuffle = False
         self.Transcoded = False
         self.Metadata = {
-            'shoko:fileid': '',
-            'shoko:epid': '',
-            'shoko:movie': '',
+            'shoko:fileid': 0,
+            'shoko:epid': 0,
+            'shoko:movie': 0,
+            'shoko:rawid': 0,
             'shoko:duration': 0,
             'shoko:userrate': '0.0',
             'shoko:traktonce': False,
-            'shoko:rawid': '',
             'shoko:path': ''
         }
         self.CanControl = True
@@ -89,11 +94,11 @@ class Service(xbmc.Player):
         # if I recall k17 give second * 1000 and k18 give only seconds
         real_duration = int(self._details['duration'])
         self.Metadata['shoko:duration'] = real_duration/1000  # if real_duration < 1000000 else real_duration/1000
-        self.Metadata['shoko:epid'] = self._details['epid']
-        self.Metadata['shoko:movie'] = self._details['movie']
-        self.Metadata['shoko:fileid'] = self._details['fileid']
+        self.Metadata['shoko:rawid'] = self._details.get('rawid', 0)
+        self.Metadata['shoko:epid'] = self._details.get('epid', 0)
+        self.Metadata['shoko:fileid'] = self._details.get('fileid', 0)
+        self.Metadata['shoko:movie'] = self._details.get('movie', 0)
         self.Metadata['shoko:traktonce'] = True
-        self.Metadata['shoko:rawid'] = self._details['rawid']
 
         self.PlaybackStatus = 'Playing'
         while not self.isPlaying():
@@ -133,7 +138,8 @@ class Service(xbmc.Player):
         # TODO userrate support
         self.Metadata['shoko:traktonce'] = True
         did_i_watch_entire_episode(self.Metadata.get('shoko:current'), self.Metadata.get('shoko:duration'),
-                                   self.Metadata.get('shoko:epid'), '0.0')
+                                   self.Metadata.get('shoko:epid'), '0.0',
+                                   self.Metadata['shoko:rawid'])
         trakt(self.Metadata.get('shoko:epid'), 3, self.Metadata.get('shoko:current'),
               self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
               self.Metadata.get('shoko:traktonce'))
