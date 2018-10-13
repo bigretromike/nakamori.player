@@ -28,7 +28,6 @@ def trakt(ep_id, status, current_time, total_time, movie, show_notification):
 
 def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate, rawid):
     _finished = False
-
     if nt.addon.getSetting('external_player') == 'false':  # k18-alpha2 self.isExternalPlayer()
         mark = float(nt.addon.getSetting("watched_mark"))
         mark /= 100
@@ -41,7 +40,7 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate, rawid
             _finished = True
 
     if _finished:
-        if rawid == 0:
+        if rawid == '0':
             if nt.addon.getSetting('vote_always') == 'true':
                 # convert in case shoko give float
                 if user_rate == '0.0':
