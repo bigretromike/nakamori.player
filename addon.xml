@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.module.nakamoriplayer" name="nakamori-player-module" version="3.0.7" provider-name="BigRetroMike, da3dsoul">
+<addon id="script.module.nakamoriplayer" name="nakamori-player-module" version="3.0.8" provider-name="BigRetroMike, da3dsoul">
     <requires>
         <import addon="xbmc.python" version="2.1.0"/>
-        <import addon="script.module.nakamori" version="3.0.7"/>
+        <import addon="script.module.nakamori" version="3.0.8"/>
     </requires>
     <extension point="xbmc.python.pluginsource">
         <provides></provides>
@@ -11,7 +11,7 @@
     <extension point="xbmc.addon.metadata">
         <summary lang="en">Nakamori Player Module</summary>
         <description lang="en">This module handle all the player related functions inside Nakamori</description>
-        <news>3.0.7[CR]- fix for missing onPlayBackStopped</news>
+        <news>3.0.8[CR]- turning vote/watch_mark for unsort files</news>
         <platform>all</platform>
         <license>GNU GENERAL PUBLIC LICENSE. Version 2, June 1991</license>
         <website>https://shokunin.monogatari.pl/</website>
