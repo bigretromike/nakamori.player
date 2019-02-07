@@ -4,7 +4,7 @@ import time
 import nakamoritools as nt
 from threading import Thread
 
-Playback_Status = ["Playing", "Paused", "Stopped"]
+Playback_Status = ["Playing", "Paused", "Stopped", "Ended"]
 
 
 def log(msg):
@@ -130,7 +130,20 @@ class Service(xbmc.Player):
 
     def onPlayBackStopped(self):
         log('onPlayBackStopped')
-        self.onPlayBackEnded()
+        # self.onPlayBackEnded()
+        self.Metadata['shoko:traktonce'] = True
+        did_i_watch_entire_episode(self.Metadata.get('shoko:current'), self.Metadata.get('shoko:duration'),
+                                   self.Metadata.get('shoko:epid'), '0.0',
+                                   self.Metadata['shoko:rawid'])
+        trakt(self.Metadata.get('shoko:epid'), 3, self.Metadata.get('shoko:current'),
+              self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
+              self.Metadata.get('shoko:traktonce'))
+
+        if self.Transcoded:
+            nt.get_json(self.Metadata.get('shoko:path') + '/cancel')
+
+        self.Playlist = None
+        self.PlaybackStatus = 'Ended'  # TODO switch them around. Ended <->Stopped
 
     def onPlayBackEnded(self):
         log('onPlayBackEnded')
