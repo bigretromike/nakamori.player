@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import xbmc
-import nakamoritools as nt
+import nakamori_utils.nakamoritools as nt
 from threading import Thread
 
 Playback_Status = ["Playing", "Paused", "Stopped", "Ended"]
