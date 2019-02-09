@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import xbmc
-import time
 import nakamoritools as nt
 from threading import Thread
 
