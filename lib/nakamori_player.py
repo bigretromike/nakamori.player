@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import xbmc
-import nakamori_utils.nakamoritools as nt
+from nakamori_utils import nakamoritools as nt
+from nakamori_utils.globalvars import *
 from threading import Thread
 
 Playback_Status = ["Playing", "Paused", "Stopped", "Ended"]
@@ -11,15 +12,15 @@ def log(msg):
 
 
 def sync_resume(file_id, current_time):
-    if nt.addon.getSetting("syncwatched") == "true":
+    if plugin_addon.getSetting("syncwatched") == "true":
         nt.sync_offset(file_id, current_time)
 
 
 def trakt(ep_id, status, current_time, total_time, movie, show_notification):
-    if nt.addon.getSetting("trakt_scrobble") == "true":
+    if plugin_addon.getSetting("trakt_scrobble") == "true":
         notification = False
         if show_notification:
-            if nt.addon.getSetting("trakt_scrobble_notification") == "true":
+            if plugin_addon.getSetting("trakt_scrobble_notification") == "true":
                 notification = True
         progress = int((current_time / total_time) * 100)
         nt.trakt_scrobble(ep_id, status, progress, movie, notification)
@@ -27,8 +28,8 @@ def trakt(ep_id, status, current_time, total_time, movie, show_notification):
 
 def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate, rawid):
     _finished = False
-    if nt.addon.getSetting('external_player') == 'false':  # k18-alpha2 self.isExternalPlayer()
-        mark = float(nt.addon.getSetting("watched_mark"))
+    if plugin_addon.getSetting('external_player') == 'false':  # k18-alpha2 self.isExternalPlayer()
+        mark = float(plugin_addon.getSetting("watched_mark"))
         mark /= 100
         log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
         if (total_time * mark) <= current_time:
@@ -40,7 +41,7 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate, rawid
 
     if _finished:
         if rawid == '0':
-            if nt.addon.getSetting('vote_always') == 'true':
+            if plugin_addon.getSetting('vote_always') == 'true':
                 # convert in case shoko give float
                 if user_rate == '0.0':
                     nt.vote_episode(ep_id)
@@ -53,7 +54,7 @@ def did_i_watch_entire_episode(current_time, total_time, ep_id, user_rate, rawid
             log('mark = watched but it was unsort file')
 
 
-class Service(xbmc.Player):
+class Player(xbmc.Player):
     def __init__(self):
         log('Init')
         xbmc.Player.__init__(self)
@@ -84,7 +85,7 @@ class Service(xbmc.Player):
     def onPlayBackStarted(self):
         log('onPlaybackStarted')
 
-        if nt.addon.getSetting('enableEigakan') == "true":
+        if plugin_addon.getSetting('enableEigakan') == "true":
             log('set Transcoded: True')
             self.Transcoded = True
 
@@ -112,17 +113,11 @@ class Service(xbmc.Player):
         log('onPlayBackResumed')
         self.PlaybackStatus = 'Playing'
         self.Metadata['shoko:traktonce'] = True
-        try:
-            self._t.stop()
-        except:
-            log('no trakt thread to stop')
+
         self._t = Thread(target=self.update_trakt, args=())
         self._t.daemon = True
         self._t.start()
-        try:
-            self._s.stop()
-        except:
-            log('no sync thread to stop')
+
         self._s = Thread(target=self.update_sync, args=())
         self._s.daemon = True
         self._s.start()
@@ -187,8 +182,8 @@ class Service(xbmc.Player):
     def update_sync(self):
         while self.isPlayingVideo():
             try:
-                if nt.addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
-                    self.Metadata['shoko:current'] = self.getTime()
+                if plugin_addon.getSetting("syncwatched") == "true" and self.getTime() > 10:
+                    self.Metadata['shoko:current'] = int(self.getTime())
                     nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
                     xbmc.sleep(100)
             except:
