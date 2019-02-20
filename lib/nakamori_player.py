@@ -28,7 +28,7 @@ def scrobble_trakt(ep_id, status, current_time, total_time, movie, show_notifica
 
 def finished_episode(current_time, total_time, ep_id, user_rate, rawid):
     _finished = False
-    if plugin_addon.getSetting('external_player') == 'false':  # k18-alpha2 self.isExternalPlayer()
+    if plugin_addon.getSetting('external_player') == 'false':
         mark = float(plugin_addon.getSetting("watched_mark"))
         mark /= 100
         log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
@@ -77,6 +77,8 @@ class Player(xbmc.Player):
             'shoko:path': ''
         }
         self.CanControl = True
+        if plugin_addon.getSetting("kodi18") == 'true':
+            plugin_addon.setSetting(id='external_player', value=self.isExternalPlayer())
 
     def reset(self):
         log('reset')
@@ -94,7 +96,7 @@ class Player(xbmc.Player):
             self.Transcoded = True
 
         self.Metadata['shoko:current'] = 0
-        # if I recall k17 give second * 1000 and k18 give only seconds
+        # TODO if I recall k17 give second * 1000 and k18 give only seconds
         real_duration = int(self._details['duration'])
         self.Metadata['shoko:duration'] = real_duration/1000  # if real_duration < 1000000 else real_duration/1000
         self.Metadata['shoko:rawid'] = self._details.get('rawid', 0)
