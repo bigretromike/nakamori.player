@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-import xbmc
 from nakamori_utils import nakamoritools as nt
 from nakamori_utils.globalvars import *
 from threading import Thread
+
+from proxy.kodi_version_proxy import kodi_proxy
 
 Playback_Status = ["Playing", "Paused", "Stopped", "Ended"]
 
@@ -77,8 +78,7 @@ class Player(xbmc.Player):
             'shoko:path': ''
         }
         self.CanControl = True
-        if plugin_addon.getSetting("kodi18") == 'true':
-            plugin_addon.setSetting(id='external_player', value=self.isExternalPlayer())
+        plugin_addon.setSetting(id='external_player', value=kodi_proxy.external_player(self))
 
     def reset(self):
         log('reset')
