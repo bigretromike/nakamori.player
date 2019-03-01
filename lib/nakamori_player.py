@@ -78,7 +78,7 @@ class Player(xbmc.Player):
             'shoko:path': ''
         }
         self.CanControl = True
-        plugin_addon.setSetting(id='external_player', value=kodi_proxy.external_player(self))
+        plugin_addon.setSetting(id='external_player', value=str(kodi_proxy.external_player(self)))
 
     def reset(self):
         log('reset')
