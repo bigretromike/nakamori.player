@@ -5,32 +5,28 @@ from threading import Thread
 
 from proxy.kodi_version_proxy import kodi_proxy
 
-Playback_Status = ["Playing", "Paused", "Stopped", "Ended"]
+
+class PlaybackStatus(object):
+    PLAYING = 'Playing'
+    PAUSED = 'Paused'
+    STOPPED = 'Stopped'
+    ENDED = 'Ended'
 
 
 def log(msg):
-    xbmc.log("-> nakamori.player::%s" % msg, level=xbmc.LOGNOTICE)
+    xbmc.log('-> nakamori.player::%s' % msg, level=xbmc.LOGNOTICE)
 
 
-def scrobble_shoko(file_id, current_time):
-    if plugin_addon.getSetting("syncwatched") == "true":
-        nt.sync_offset(file_id, current_time)
+def scrobble_trakt(ep_id, status, current_time, total_time, movie):
+    if plugin_addon.getSetting('trakt_scrobble') == 'true':
+        progress = int(current_time / total_time * 100.0)
+        nt.trakt_scrobble(ep_id, status, progress, movie, False)
 
 
-def scrobble_trakt(ep_id, status, current_time, total_time, movie, show_notification):
-    if plugin_addon.getSetting("trakt_scrobble") == "true":
-        notification = False
-        if show_notification:
-            if plugin_addon.getSetting("trakt_scrobble_notification") == "true":
-                notification = True
-        progress = int((current_time / total_time) * 100)
-        nt.trakt_scrobble(ep_id, status, progress, movie, notification)
-
-
-def finished_episode(current_time, total_time, ep_id, user_rate, rawid):
+def finished_episode(ep_id, current_time, total_time):
     _finished = False
     if plugin_addon.getSetting('external_player') == 'false':
-        mark = float(plugin_addon.getSetting("watched_mark"))
+        mark = float(plugin_addon.getSetting('watched_mark'))
         mark /= 100
         log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
         if (total_time * mark) <= current_time:
@@ -41,18 +37,14 @@ def finished_episode(current_time, total_time, ep_id, user_rate, rawid):
             _finished = True
 
     if _finished:
-        if rawid == '0':
-            if plugin_addon.getSetting('vote_always') == 'true':
-                # convert in case shoko give float
-                if user_rate == '0.0':
-                    nt.vote_episode(ep_id)
-                else:
-                    log("vote_always found 'userrate' %s" % user_rate)
-            params = {'ep_id': ep_id, 'watched': True}
-            nt.mark_watch_status(params)
-        else:
-            # TODO unsort files vote/watchmark support
-            log('mark = watched but it was unsort file')
+        if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
+            # convert in case shoko give float
+            nt.vote_episode(ep_id)
+        params = {'ep_id': ep_id, 'watched': True}
+        nt.mark_watch_status(params)
+    else:
+        # TODO unsort files vote/watchmark support
+        log('mark = watched but it was unsort file')
 
 
 class Player(xbmc.Player):
@@ -66,17 +58,13 @@ class Player(xbmc.Player):
         self.PlaybackStatus = 'Stopped'
         self.LoopStatus = 'None'
         self.Shuffle = False
-        self.Transcoded = False
-        self.Metadata = {
-            'shoko:fileid': 0,
-            'shoko:epid': 0,
-            'shoko:movie': 0,
-            'shoko:rawid': 0,
-            'shoko:duration': 0,
-            'shoko:userrate': '0.0',
-            'shoko:traktonce': False,
-            'shoko:path': ''
-        }
+        self.is_transcoded = False
+        self.is_movie = None
+        self.file_id = 0
+        self.ep_id = 0
+        self.duration = 0
+        self.path = ''
+        self.scrobble = True
         self.CanControl = True
         plugin_addon.setSetting(id='external_player', value=str(kodi_proxy.external_player(self)))
 
@@ -84,45 +72,43 @@ class Player(xbmc.Player):
         log('reset')
         self.__init__()
 
-    def feed(self, details):
+    def feed(self, file_id, ep_id, duration, path, scrobble):
         log('feed')
-        self._details = details
+        self.file_id = file_id
+        self.ep_id = ep_id
+        self.duration = duration
+        self.path = path
+        self.scrobble = scrobble
 
     def onPlayBackStarted(self):
         log('onPlaybackStarted')
 
-        if plugin_addon.getSetting('enableEigakan') == "true":
+        if plugin_addon.getSetting('enableEigakan') == 'true':
             log('set Transcoded: True')
-            self.Transcoded = True
+            self.is_transcoded = True
 
-        self.Metadata['shoko:current'] = 0
-        # TODO if I recall k17 give second * 1000 and k18 give only seconds
-        real_duration = int(self._details['duration'])
-        self.Metadata['shoko:duration'] = real_duration/1000  # if real_duration < 1000000 else real_duration/1000
-        self.Metadata['shoko:rawid'] = self._details.get('rawid', 0)
-        self.Metadata['shoko:epid'] = self._details.get('epid', 0)
-        self.Metadata['shoko:fileid'] = self._details.get('fileid', 0)
-        self.Metadata['shoko:movie'] = self._details.get('movie', 0)
-        self.Metadata['shoko:traktonce'] = True
+        # we are getting the duration in s from Shoko, so no worries about Kodi version
+        duration = int(self.getTotalTime())
+        if self.is_transcoded:
+            duration = self.duration
 
-        self.PlaybackStatus = 'Playing'
+        self.duration = duration
+
+        self.PlaybackStatus = PlaybackStatus.PLAYING
         # we are making the player global, so if a stop is issued, then Playing will change
-        while not self.isPlaying() and self.PlaybackStatus == 'Playing':
+        while not self.isPlaying() and self.PlaybackStatus == PlaybackStatus.PLAYING:
             xbmc.sleep(100)
-        if self.PlaybackStatus != 'Playing':
+        if self.PlaybackStatus != PlaybackStatus.PLAYING:
             return
 
-        duration = self.getTotalTime()
-        if self.Transcoded:
-            duration = self.Metadata.get('shoko:duration')
-        scrobble_trakt(self.Metadata.get('shoko:epid'), 1, 0, duration, self.Metadata.get('shoko:movie'),
-                       self.Metadata.get('shoko:traktonce'))
+        # TODO get series and populate
+        self.is_movie = False
+        scrobble_trakt(self.ep_id, 1, self.getTime(), duration, self.is_movie)
         self.onPlayBackResumed()
 
     def onPlayBackResumed(self):
         log('onPlayBackResumed')
-        self.PlaybackStatus = 'Playing'
-        self.Metadata['shoko:traktonce'] = True
+        self.PlaybackStatus = PlaybackStatus.PLAYING
 
         self._t = Thread(target=self.tick_loop_trakt, args=())
         self._t.daemon = True
@@ -136,62 +122,50 @@ class Player(xbmc.Player):
         log('onPlayBackStopped')
         # self.onPlayBackEnded()
         self.scrobble_finished_episode()
-        self.PlaybackStatus = 'Stopped'  # TODO switch them around. Ended <->Stopped
+        self.PlaybackStatus = PlaybackStatus.STOPPED  # TODO switch them around. Ended <->Stopped
 
     def onPlayBackEnded(self):
         log('onPlayBackEnded')
         # TODO userrate support
         self.scrobble_finished_episode()
-        self.PlaybackStatus = 'Ended'
+        self.PlaybackStatus = PlaybackStatus.ENDED
 
     def onPlayBackPaused(self):
         log('onPlayBackPaused')
-        self.Metadata['shoko:traktonce'] = True
-        scrobble_trakt(self.Metadata.get('shoko:epid'), 2, self.Metadata.get('shoko:current'),
-                       self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
-                       self.Metadata.get('shoko:traktonce'))
-        self.PlaybackStatus = 'Paused'
+        self.PlaybackStatus = PlaybackStatus.PAUSED
+        scrobble_trakt(self.ep_id, 2, self.getTime(), self.duration, self.is_movie)
 
     def onPlayBackSeek(self, time_to_seek, seek_offset):
         log('onPlayBackSeek with %s, %s' % (time_to_seek, seek_offset))
 
     def tick_loop_trakt(self):
-        if plugin_addon.getSetting("trakt_scrobble") != "true":
+        if plugin_addon.getSetting('trakt_scrobble') != 'true':
             return
-        while self.isPlayingVideo():
-            self.Metadata['shoko:current'] = self.getTime()
-            scrobble_trakt(self.Metadata.get('shoko:epid'), 1, self.Metadata.get('shoko:current'),
-                           self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
-                           self.Metadata.get('shoko:traktonce'))
-            self.Metadata['shoko:traktonce'] = False
+        while self.scrobble and self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
+            scrobble_trakt(self.ep_id, 1, self.getTime(), self.duration, self.is_movie)
             xbmc.sleep(2500)
         else:
-            log("trakt_thread: not playing anything")
+            log('trakt_thread: not playing anything')
             return
 
     def tick_loop_shoko(self):
-        while self.isPlayingVideo():
+        while self.scrobble and self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
             try:
-                if plugin_addon.getSetting("file_resume") == "true" and self.getTime() > 10:
-                    self.Metadata['shoko:current'] = int(self.getTime())
-                    nt.sync_offset(self.Metadata.get('shoko:fileid'), self.Metadata.get('shoko:current'))
+                if plugin_addon.getSetting('file_resume') == 'true' and self.getTime() > 10:
+                    nt.sync_offset(self.file_id, self.getTime())
                     xbmc.sleep(2500)
             except:
                 pass  # while buffering
         else:
-            log("sync_thread: not playing anything")
+            log('sync_thread: not playing anything')
             return
 
     def scrobble_finished_episode(self):
-        self.Metadata['shoko:traktonce'] = True
-        finished_episode(self.Metadata.get('shoko:current'), self.Metadata.get('shoko:duration'),
-                         self.Metadata.get('shoko:epid'), '0.0',
-                         self.Metadata['shoko:rawid'])
-        scrobble_trakt(self.Metadata.get('shoko:epid'), 3, self.Metadata.get('shoko:current'),
-                       self.Metadata.get('shoko:duration'), self.Metadata.get('shoko:movie'),
-                       self.Metadata.get('shoko:traktonce'))
+        if self.scrobble:
+            finished_episode(self.ep_id, self.getTime(), self.duration)
+            scrobble_trakt(self.ep_id, 3, self.getTime(), self.duration, self.is_movie)
 
-        if self.Transcoded:
-            nt.get_json(self.Metadata.get('shoko:path') + '/cancel')
+        if self.is_transcoded:
+            nt.get_json(self.path + '/cancel')
 
         self.Playlist = None
