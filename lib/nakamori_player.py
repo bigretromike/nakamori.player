@@ -4,6 +4,7 @@ from nakamori_utils.globalvars import *
 from threading import Thread
 
 from proxy.kodi_version_proxy import kodi_proxy
+from error_handler import log
 
 
 class PlaybackStatus(object):
@@ -11,10 +12,6 @@ class PlaybackStatus(object):
     PAUSED = 'Paused'
     STOPPED = 'Stopped'
     ENDED = 'Ended'
-
-
-def log(msg):
-    xbmc.log('-> nakamori.player::%s' % msg, level=xbmc.LOGNOTICE)
 
 
 def scrobble_trakt(ep_id, status, current_time, total_time, movie):
@@ -40,8 +37,9 @@ def finished_episode(ep_id, current_time, total_time):
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
             # convert in case shoko give float
             nt.vote_episode(ep_id)
-        params = {'ep_id': ep_id, 'watched': True}
-        nt.mark_watch_status(params)
+        from shoko_models.v2 import Episode
+        ep = Episode(ep_id, build_full_object=False)
+        ep.set_watched_status(True)
     else:
         # TODO unsort files vote/watchmark support
         log('mark = watched but it was unsort file')
@@ -65,6 +63,7 @@ class Player(xbmc.Player):
         self.duration = 0
         self.path = ''
         self.scrobble = True
+        self.time = 0
         self.CanControl = True
         plugin_addon.setSetting(id='external_player', value=str(kodi_proxy.external_player(self)))
 
@@ -118,11 +117,14 @@ class Player(xbmc.Player):
         self._s.daemon = True
         self._s.start()
 
+        self._s = Thread(target=self.tick_loop_update_time, args=())
+        self._s.daemon = True
+        self._s.start()
+
     def onPlayBackStopped(self):
         log('onPlayBackStopped')
-        # self.onPlayBackEnded()
         self.scrobble_finished_episode()
-        self.PlaybackStatus = PlaybackStatus.STOPPED  # TODO switch them around. Ended <->Stopped
+        self.PlaybackStatus = PlaybackStatus.STOPPED
 
     def onPlayBackEnded(self):
         log('onPlayBackEnded')
@@ -133,16 +135,21 @@ class Player(xbmc.Player):
     def onPlayBackPaused(self):
         log('onPlayBackPaused')
         self.PlaybackStatus = PlaybackStatus.PAUSED
-        scrobble_trakt(self.ep_id, 2, self.getTime(), self.duration, self.is_movie)
+        scrobble_trakt(self.ep_id, 2, self.time, self.duration, self.is_movie)
+        if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
+            nt.sync_offset(self.file_id, self.time)
 
     def onPlayBackSeek(self, time_to_seek, seek_offset):
         log('onPlayBackSeek with %s, %s' % (time_to_seek, seek_offset))
+        self.time = self.getTime()
+        if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
+            nt.sync_offset(self.file_id, self.time)
 
     def tick_loop_trakt(self):
         if plugin_addon.getSetting('trakt_scrobble') != 'true':
             return
         while self.scrobble and self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
-            scrobble_trakt(self.ep_id, 1, self.getTime(), self.duration, self.is_movie)
+            scrobble_trakt(self.ep_id, 1, self.time, self.duration, self.is_movie)
             xbmc.sleep(2500)
         else:
             log('trakt_thread: not playing anything')
@@ -151,8 +158,8 @@ class Player(xbmc.Player):
     def tick_loop_shoko(self):
         while self.scrobble and self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
             try:
-                if plugin_addon.getSetting('file_resume') == 'true' and self.getTime() > 10:
-                    nt.sync_offset(self.file_id, self.getTime())
+                if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
+                    nt.sync_offset(self.file_id, self.time)
                     xbmc.sleep(2500)
             except:
                 pass  # while buffering
@@ -160,10 +167,21 @@ class Player(xbmc.Player):
             log('sync_thread: not playing anything')
             return
 
+    def tick_loop_update_time(self):
+        while self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
+            try:
+                self.time = self.getTime()
+                xbmc.sleep(500)
+            except:
+                pass  # while buffering
+        else:
+            log('update_time: not playing anything')
+            return
+
     def scrobble_finished_episode(self):
         if self.scrobble:
-            finished_episode(self.ep_id, self.getTime(), self.duration)
-            scrobble_trakt(self.ep_id, 3, self.getTime(), self.duration, self.is_movie)
+            finished_episode(self.ep_id, self.time, self.duration)
+            scrobble_trakt(self.ep_id, 3, self.time, self.duration, self.is_movie)
 
         if self.is_transcoded:
             nt.get_json(self.path + '/cancel')
