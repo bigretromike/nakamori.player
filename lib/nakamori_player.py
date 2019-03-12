@@ -137,7 +137,7 @@ def process_transcoder(file_id, file_url, file_obj):
     ts_url = eigakan_host + '/api/video/' + str(file_id) + '/play0.ts'
 
     try:
-        eigakan_data = nt.get_json(eigakan_host + '/api/version')
+        eigakan_data = pyproxy.get_json(eigakan_host + '/api/version')
         if 'eigakan' not in eigakan_data:
             nt.error('Eigakan server is unavailable')
             return is_transcoded, m3u8_url
@@ -261,7 +261,7 @@ def play_video_old(ep_id, raw_id, movie):
         if ep_id != '0':
             episode_url = server + '/api/ep?id=' + str(ep_id)
             episode_url = pyproxy.set_parameter(episode_url, 'level', '1')
-            html = nt.get_json(pyproxy.encode(episode_url))
+            html = pyproxy.get_json(pyproxy.encode(episode_url))
             if plugin_addon.getSetting('spamLog') == 'true':
                 xbmc.log(html, xbmc.LOGWARNING)
             episode_body = json.loads(html)
@@ -275,7 +275,7 @@ def play_video_old(ep_id, raw_id, movie):
         if file_id is not None and file_id != 0:
             details['fileid'] = file_id
             file_url = server + '/api/file?id=' + str(file_id)
-            file_body = json.loads(nt.get_json(file_url))
+            file_body = json.loads(pyproxy.get_json(file_url))
 
             file_url = file_body['url']
             server_path = file_body.get('server_path', '')
@@ -490,6 +490,6 @@ class Player(xbmc.Player):
             scrobble_trakt(self.ep_id, 3, self.time, self.duration, self.is_movie)
 
         if self.is_transcoded:
-            nt.get_json(self.path + '/cancel')
+            pyproxy.get_json(self.path + '/cancel')
 
         self.Playlist = None
