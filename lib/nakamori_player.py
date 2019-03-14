@@ -56,17 +56,19 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     Plays a file
     :param file_id: file ID. It is needed to look up the file
     :param ep_id: episode ID, not needed, but it fills in a lot of info
-    :param mark_as_watched: showld we mark it after playback
+    :param mark_as_watched: should we mark it after playback
     :param resume: should we auto-resume
     :return: True if successfully playing
     """
 
-    from shoko_models.v2 import Episode, File
+    from shoko_models.v2 import Episode, File, get_series_for_episode
     file_url = ''
-    item = ''
 
     if int(ep_id) != 0:
         ep = Episode(ep_id, build_full_object=True)
+        series = get_series_for_episode(ep_id)
+        ep.series_id = series.id
+        ep.series_name = series.name
         item = ep.get_listitem()
         f = ep.get_file_with_id(file_id)
         details = infolabel_utils.get_infolabels_for_episode(ep)
@@ -95,8 +97,8 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
         xbmc.log('---> player_ex: ' + str(player_ex), xbmc.LOGWARNING)
 
     # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
+    # TODO Move the instance to Service, so that it is never disposed
     xbmc.sleep(int(plugin_addon.getSetting('player_sleep')))
-
     return player_loop(player)
 
 
