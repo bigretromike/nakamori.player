@@ -67,14 +67,15 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
 
     if int(ep_id) != 0:
         ep = Episode(ep_id, build_full_object=True)
+        item = ep.get_listitem()
         f = ep.get_file_with_id(file_id)
         details = infolabel_utils.get_infolabels_for_episode(ep)
     else:
         f = File(file_id, build_full_object=True)
+        item = f.get_listitem()
         details = infolabel_utils.get_infolabels_for_file(f)
 
-    if f is not None:
-        item = f.get_listitem()
+    if item is not None:
         if resume:
             item.set_resume()
         file_url = f.url_for_player
