@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import nakamori_utils.shoko_utils
 import xbmcgui
-from nakamori_utils import nakamoritools as nt, infolabel_utils
+from nakamori_utils import infolabel_utils
 from nakamori_utils.globalvars import *
 from threading import Thread
 
@@ -23,7 +23,7 @@ class PlaybackStatus(object):
 def scrobble_trakt(ep_id, status, current_time, total_time, movie):
     if plugin_addon.getSetting('trakt_scrobble') == 'true':
         progress = int(current_time / total_time * 100.0)
-        nt.trakt_scrobble(ep_id, status, progress, movie, False)
+        nakamori_utils.shoko_utils.trakt_scrobble(ep_id, status, progress, movie, False)
 
 
 def finished_episode(ep_id, current_time, total_time):
@@ -313,13 +313,17 @@ class Player(xbmc.Player):
         self.PlaybackStatus = PlaybackStatus.PAUSED
         scrobble_trakt(self.ep_id, 2, self.time, self.duration, self.is_movie)
         if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-            nt.sync_offset(self.file_id, self.time)
+            from shoko_models.v2 import File
+            f = File(self.file_id)
+            f.set_resume_time(self.time)
 
     def onPlayBackSeek(self, time_to_seek, seek_offset):
         log('onPlayBackSeek with %s, %s' % (time_to_seek, seek_offset))
         self.time = self.getTime()
         if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-            nt.sync_offset(self.file_id, self.time)
+            from shoko_models.v2 import File
+            f = File(self.file_id)
+            f.set_resume_time(self.time)
 
     def tick_loop_trakt(self):
         if plugin_addon.getSetting('trakt_scrobble') != 'true':
@@ -335,7 +339,9 @@ class Player(xbmc.Player):
         while self.scrobble and self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
             try:
                 if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-                    nt.sync_offset(self.file_id, self.time)
+                    from shoko_models.v2 import File
+                    f = File(self.file_id)
+                    f.set_resume_time(self.time)
                     xbmc.sleep(2500)
             except:
                 pass  # while buffering
