@@ -79,7 +79,7 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
 
     if item is not None:
         if resume:
-            item.set_resume()
+            item.resume()
         file_url = f.url_for_player
 
     is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
