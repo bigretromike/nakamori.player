@@ -302,11 +302,13 @@ class Player(xbmc.Player):
         log('onPlayBackStopped')
         self.scrobble_finished_episode()
         self.PlaybackStatus = PlaybackStatus.STOPPED
+        self.refresh()
 
     def onPlayBackEnded(self):
         log('onPlayBackEnded')
         self.scrobble_finished_episode()
         self.PlaybackStatus = PlaybackStatus.ENDED
+        self.refresh()
 
     def onPlayBackPaused(self):
         log('onPlayBackPaused')
@@ -369,3 +371,7 @@ class Player(xbmc.Player):
             pyproxy.get_json(self.path + '/cancel')
 
         self.Playlist = None
+
+    def refresh(self):
+        wait = int(plugin_addon.getSetting('refresh_wait'))
+        script_utils.arbiter(wait, 'Container.Refresh')
