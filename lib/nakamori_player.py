@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import nakamori_utils.shoko_utils
 import xbmcgui
-from nakamori_utils import infolabel_utils
 from nakamori_utils.globalvars import *
+from nakamori_utils import script_utils
 from threading import Thread
 
 from proxy.kodi_version_proxy import kodi_proxy
@@ -22,7 +22,8 @@ class PlaybackStatus(object):
 
 def scrobble_trakt(ep_id, status, current_time, total_time, movie):
     if plugin_addon.getSetting('trakt_scrobble') == 'true':
-        progress = int(current_time / total_time * 100.0)
+        # clamp it to 0-100
+        progress = max(0, min(100, int(current_time / total_time * 100.0)))
         nakamori_utils.shoko_utils.trakt_scrobble(ep_id, status, progress, movie, False)
 
 
@@ -41,11 +42,11 @@ def finished_episode(ep_id, current_time, total_time):
 
     if _finished:
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
-            # convert in case shoko give float
-            nakamori_utils.shoko_utils.vote_episode(ep_id)
+            script_utils.vote_for_episode(ep_id)
         from shoko_models.v2 import Episode
         ep = Episode(ep_id, build_full_object=False)
         ep.set_watched_status(True)
+        # TODO we could do vote series here pretty easily
     else:
         # TODO unsort files vote/watchmark support
         log('mark = watched but it was unsort file')
@@ -71,11 +72,9 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
         ep.series_name = series.name
         item = ep.get_listitem()
         f = ep.get_file_with_id(file_id)
-        details = infolabel_utils.get_infolabels_for_episode(ep)
     else:
         f = File(file_id, build_full_object=True)
         item = f.get_listitem()
-        details = infolabel_utils.get_infolabels_for_file(f)
 
     if item is not None:
         if resume:
@@ -85,7 +84,7 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
 
     player = Player()
-    player.feed(file_id, ep_id, details.get('duration', 0), m3u8_url if is_transcoded else file_url, mark_as_watched)
+    player.feed(file_id, ep_id, f.duration, m3u8_url if is_transcoded else file_url, mark_as_watched)
 
     try:
         if is_transcoded:
@@ -236,10 +235,12 @@ class Player(xbmc.Player):
         self.is_movie = None
         self.file_id = 0
         self.ep_id = 0
+        # we will store duration and time in kodi format here, so that calls to the player will match
         self.duration = 0
+        self.time = 0
         self.path = ''
         self.scrobble = True
-        self.time = 0
+
         self.CanControl = True
         plugin_addon.setSetting(id='external_player', value=str(kodi_proxy.external_player(self)))
 
@@ -251,7 +252,7 @@ class Player(xbmc.Player):
         log('feed')
         self.file_id = file_id
         self.ep_id = ep_id
-        self.duration = duration
+        self.duration = kodi_proxy.duration_to_kodi(duration)
         self.path = path
         self.scrobble = scrobble
 
@@ -304,7 +305,6 @@ class Player(xbmc.Player):
 
     def onPlayBackEnded(self):
         log('onPlayBackEnded')
-        # TODO userrate support
         self.scrobble_finished_episode()
         self.PlaybackStatus = PlaybackStatus.ENDED
 
@@ -315,7 +315,7 @@ class Player(xbmc.Player):
         if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
             from shoko_models.v2 import File
             f = File(self.file_id)
-            f.set_resume_time(self.time)
+            f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
 
     def onPlayBackSeek(self, time_to_seek, seek_offset):
         log('onPlayBackSeek with %s, %s' % (time_to_seek, seek_offset))
@@ -323,7 +323,7 @@ class Player(xbmc.Player):
         if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
             from shoko_models.v2 import File
             f = File(self.file_id)
-            f.set_resume_time(self.time)
+            f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
 
     def tick_loop_trakt(self):
         if plugin_addon.getSetting('trakt_scrobble') != 'true':
@@ -341,7 +341,7 @@ class Player(xbmc.Player):
                 if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
                     from shoko_models.v2 import File
                     f = File(self.file_id)
-                    f.set_resume_time(self.time)
+                    f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
                     xbmc.sleep(2500)
             except:
                 pass  # while buffering
