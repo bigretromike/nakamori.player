@@ -373,5 +373,5 @@ class Player(xbmc.Player):
         self.Playlist = None
 
     def refresh(self):
-        wait = int(plugin_addon.getSetting('refresh_wait'))
+        wait = pyproxy.safe_int(plugin_addon.getSetting('refresh_wait'))
         script_utils.arbiter(wait, 'Container.Refresh')
