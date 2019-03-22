@@ -20,6 +20,16 @@ class PlaybackStatus(object):
     ENDED = 'Ended'
 
 
+eigakan_url = plugin_addon.getSetting('ipEigakan')
+eigakan_port = plugin_addon.getSetting('portEigakan')
+eigakan_host = 'http://' + eigakan_url + ':' + eigakan_port
+
+
+def trancode_url(file_id):
+    video_url = eigakan_host + '/api/transcode/' + str(file_id)
+    return video_url
+
+
 def scrobble_trakt(ep_id, status, current_time, total_time, movie):
     if plugin_addon.getSetting('trakt_scrobble') == 'true':
         # clamp it to 0-100
@@ -130,10 +140,8 @@ def process_transcoder(file_id, file_url, file_obj):
     is_transcoded = False
     if plugin_addon.getSetting('enableEigakan') != 'true':
         return is_transcoded, m3u8_url
-    eigakan_url = plugin_addon.getSetting('ipEigakan')
-    eigakan_port = plugin_addon.getSetting('portEigakan')
-    eigakan_host = 'http://' + eigakan_url + ':' + eigakan_port
-    video_url = eigakan_host + '/api/transcode/' + str(file_id)
+
+    video_url = trancode_url(file_id)
     post_data = '"file":"' + file_url + '"'
     try_count = 0
     m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.m3u8'
@@ -368,7 +376,7 @@ class Player(xbmc.Player):
             scrobble_trakt(self.ep_id, 3, self.time, self.duration, self.is_movie)
 
         if self.is_transcoded:
-            pyproxy.get_json(self.path + '/cancel')
+            pyproxy.get_json(trancode_url(self.file_id) + '/cancel')
 
         self.Playlist = None
 
