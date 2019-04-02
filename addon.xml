@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.module.nakamoriplayer" name="nakamori-player-module" version="3.1.0~beta11" provider-name="BigRetroMike, da3dsoul">
+<addon id="script.module.nakamoriplayer" name="nakamori-player-module" version="3.1.0~beta12" provider-name="BigRetroMike, da3dsoul">
     <requires>
         <import addon="xbmc.python" version="2.1.0"/>
-        <import addon="script.module.nakamori-lib" version="3.1.0~beta16" />
+        <import addon="script.module.nakamori-lib" version="3.1.0~beta24" />
     </requires>
     <extension point="xbmc.python.pluginsource">
         <provides></provides>
