@@ -271,13 +271,6 @@ class Player(xbmc.Player):
             log('set Transcoded: True')
             self.is_transcoded = True
 
-        # we are getting the duration in s from Shoko, so no worries about Kodi version
-        duration = int(self.getTotalTime())
-        if self.is_transcoded:
-            duration = self.duration
-
-        self.duration = duration
-
         self.PlaybackStatus = PlaybackStatus.PLAYING
         # we are making the player global, so if a stop is issued, then Playing will change
         while not self.isPlaying() and self.PlaybackStatus == PlaybackStatus.PLAYING:
@@ -285,9 +278,14 @@ class Player(xbmc.Player):
         if self.PlaybackStatus != PlaybackStatus.PLAYING:
             return
 
+        # wait until the player is init'd and playing
+        self.set_duration()
+
         # TODO get series and populate
         self.is_movie = False
-        scrobble_trakt(self.ep_id, 1, self.getTime(), duration, self.is_movie)
+        if self.duration > 0:
+            scrobble_trakt(self.ep_id, 1, self.getTime(), self.duration, self.is_movie)
+
         self.onPlayBackResumed()
 
     def onPlayBackResumed(self):
@@ -335,6 +333,14 @@ class Player(xbmc.Player):
             f = File(self.file_id)
             f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
 
+    def set_duration(self):
+        if self.duration != 0:
+            return
+        duration = int(self.getTotalTime())
+        if self.is_transcoded:
+            duration = self.duration
+        self.duration = duration
+
     def tick_loop_trakt(self):
         if plugin_addon.getSetting('trakt_scrobble') != 'true':
             return
@@ -362,6 +368,8 @@ class Player(xbmc.Player):
     def tick_loop_update_time(self):
         while self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
             try:
+                # Leia seems to have a bug where calling self.getTotalTime() fails at times, so call it until it doesn't
+                self.set_duration()
                 self.time = self.getTime()
                 xbmc.sleep(500)
             except:
