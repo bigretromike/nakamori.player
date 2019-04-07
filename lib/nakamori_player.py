@@ -151,7 +151,7 @@ def process_transcoder(file_id, file_url, file_obj):
 
     try:
         eigakan_data = pyproxy.get_json(eigakan_host + '/api/version')
-        if 'eigakan' not in eigakan_data:
+        if eigakan_data is None or 'eigakan' not in eigakan_data:
             raise RuntimeError('Invalid response from Eigakan')
 
         audio_stream_id = find_language_index(file_obj.audio_streams, plugin_addon.getSetting('audiolangEigakan'))
