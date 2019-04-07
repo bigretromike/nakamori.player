@@ -46,9 +46,11 @@ def finished_episode(ep_id, current_time, total_time):
         if (total_time * mark) <= current_time:
             _finished = True
     else:
-        # external set position = 1.0 when it want to mark it as watched (based on configuration of external)
+        # external set position = 1.0 when it want to mark it as watched (based on configuration of external
         if current_time > 0.0:
             _finished = True
+        else:
+            log('Using an external player, but the settings are set to not mark as watched. Check advancedsettings.xml')
 
     if _finished:
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
@@ -250,7 +252,9 @@ class Player(xbmc.Player):
         self.scrobble = True
 
         self.CanControl = True
-        plugin_addon.setSetting(id='external_player', value=str(kodi_proxy.external_player(self)))
+        is_external = str(kodi_proxy.external_player(self)).lower()
+        plugin_addon.setSetting(id='external_player', value=is_external)
+        log('is_external=%s' % is_external)
 
     def reset(self):
         log('reset')
