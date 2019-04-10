@@ -8,7 +8,7 @@ from threading import Thread
 from proxy.kodi_version_proxy import kodi_proxy
 from proxy.python_version_proxy import python_proxy as pyproxy
 import error_handler as eh
-from error_handler import log, ErrorPriority
+from error_handler import spam, log, ErrorPriority
 
 busy = xbmcgui.DialogProgress()
 
@@ -37,7 +37,7 @@ def scrobble_trakt(ep_id, status, current_time, total_time, movie):
         nakamori_utils.shoko_utils.trakt_scrobble(ep_id, status, progress, movie, False)
 
 
-def finished_episode(ep_id, current_time, total_time):
+def finished_episode(ep_id, file_id, current_time, total_time):
     _finished = False
     if plugin_addon.getSetting('external_player').lower() == 'false':
         mark = float(plugin_addon.getSetting('watched_mark'))
@@ -55,13 +55,16 @@ def finished_episode(ep_id, current_time, total_time):
     if _finished:
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
             script_utils.vote_for_episode(ep_id)
-        from shoko_models.v2 import Episode
-        ep = Episode(ep_id, build_full_object=False)
-        ep.set_watched_status(True)
-        # TODO we could do vote series here pretty easily
-    else:
-        # TODO unsort files vote/watchmark support
-        log('mark = watched but it was unsort file')
+        if ep_id != 0:
+            from shoko_models.v2 import Episode
+            ep = Episode(ep_id, build_full_object=False)
+            ep.set_watched_status(True)
+            # TODO we could do vote series here pretty easily
+        elif file_id != 0:
+            # file watched states
+            pass
+
+
 
 
 def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
@@ -75,6 +78,25 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     """
 
     from shoko_models.v2 import Episode, File, get_series_for_episode
+
+    # check if we're already playing something
+    player = xbmc.Player()
+    if player.isPlayingVideo():
+        playing_item = player.getPlayingFile()
+        log('Player is currently playing %s' % playing_item)
+        log('Player Stopping')
+        player.stop()
+
+    # wait for it to stop
+    while True:
+        try:
+            if not player.isPlayingVideo():
+                break
+            xbmc.sleep(500)
+            continue
+        except:
+            pass
+    # now continue
     file_url = ''
 
     if int(ep_id) != 0:
@@ -104,8 +126,8 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
         else:
             player.play(item=file_url, listitem=item)
 
-    except Exception as player_ex:
-        xbmc.log('---> player_ex: ' + str(player_ex), xbmc.LOGWARNING)
+    except:
+        eh.exception(ErrorPriority.BLOCKING)
 
     # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
     # TODO Move the instance to Service, so that it is never disposed
@@ -116,16 +138,19 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
 def player_loop(player):
     # while player.isPlaying():
     #     xbmc.sleep(500)
-    monitor = xbmc.Monitor()
-    while player.PlaybackStatus != 'Stopped' and player.PlaybackStatus != 'Ended':
-        xbmc.sleep(500)
-    if player.PlaybackStatus == 'Ended':
-        xbmc.log(' Ended -------~ ~~ ~ ----> ' + str(monitor.abortRequested()), xbmc.LOGWARNING)
+    try:
+        monitor = xbmc.Monitor()
+        while player.PlaybackStatus != PlaybackStatus.STOPPED and player.PlaybackStatus != PlaybackStatus.ENDED:
+            xbmc.sleep(500)
+        if player.PlaybackStatus == PlaybackStatus.STOPPED or player.PlaybackStatus == PlaybackStatus.ENDED:
+            log('Playback Ended - Shutting Down: ', monitor.abortRequested())
+            return -1
+        else:
+            log('Playback Ended - Playback status was not "Stopped" or "Ended". It was ', player.PlaybackStatus)
+        return 0
+    except:
+        eh.exception(ErrorPriority.HIGHEST)
         return -1
-    else:
-        xbmc.log('player.PlaybackStatus=============' + str(player.PlaybackStatus))
-    xbmc.log('-------~ ~~ ~ ----> ' + str(monitor.abortRequested()), xbmc.LOGWARNING)
-    return 0
 
 
 def process_transcoder(file_id, file_url, file_obj):
@@ -232,7 +257,7 @@ def find_language_index(streams, setting):
 # noinspection PyUnusedFunction
 class Player(xbmc.Player):
     def __init__(self):
-        log('Init')
+        spam('Player Initialized')
         xbmc.Player.__init__(self)
         self._t = None  # trakt thread
         self._s = None  # sync thread
@@ -252,16 +277,22 @@ class Player(xbmc.Player):
         self.scrobble = True
 
         self.CanControl = True
-        is_external = str(kodi_proxy.external_player(self)).lower()
-        plugin_addon.setSetting(id='external_player', value=is_external)
-        log('is_external=%s' % is_external)
+        try:
+            is_external = str(kodi_proxy.external_player(self)).lower()
+            plugin_addon.setSetting(id='external_player', value=is_external)
+        except:
+            eh.exception(ErrorPriority.HIGH)
+        spam(self)
+        if kodi_proxy.external_player(self):
+            log('Using External Player')
 
     def reset(self):
-        log('reset')
+        spam('Player reset')
         self.__init__()
 
     def feed(self, file_id, ep_id, duration, path, scrobble):
-        log('feed')
+        spam('Player feed - file_id=%s ep_id=%s duration=%s path=%s scrobble=%s' %
+             (file_id, ep_id, duration, path, scrobble))
         self.file_id = file_id
         self.ep_id = ep_id
         self.duration = kodi_proxy.duration_to_kodi(duration)
@@ -269,33 +300,40 @@ class Player(xbmc.Player):
         self.scrobble = scrobble
 
     def onPlayBackStarted(self):
-        log('onPlaybackStarted')
+        spam('Playback Started')
+        try:
+            if plugin_addon.getSetting('enableEigakan') == 'true':
+                log('Player is set to use Transcoding')
+                self.is_transcoded = True
 
-        if plugin_addon.getSetting('enableEigakan') == 'true':
-            log('set Transcoded: True')
-            self.is_transcoded = True
+            # wait until the player is init'd and playing
+            self.set_duration()
 
-        self.PlaybackStatus = PlaybackStatus.PLAYING
-        # we are making the player global, so if a stop is issued, then Playing will change
-        while not self.isPlaying() and self.PlaybackStatus == PlaybackStatus.PLAYING:
-            xbmc.sleep(100)
-        if self.PlaybackStatus != PlaybackStatus.PLAYING:
-            return
+            self.PlaybackStatus = PlaybackStatus.PLAYING
+            # we are making the player global, so if a stop is issued, then Playing will change
+            while not self.isPlaying() and self.PlaybackStatus == PlaybackStatus.PLAYING:
+                xbmc.sleep(100)
+            if self.PlaybackStatus != PlaybackStatus.PLAYING:
+                return
 
-        # wait until the player is init'd and playing
-        self.set_duration()
+            # TODO get series and populate
+            self.is_movie = False
+            if self.duration > 0:
+                scrobble_trakt(self.ep_id, 1, self.getTime(), self.duration, self.is_movie)
 
-        # TODO get series and populate
-        self.is_movie = False
-        if self.duration > 0:
-            scrobble_trakt(self.ep_id, 1, self.getTime(), self.duration, self.is_movie)
-
-        self.onPlayBackResumed()
+            self.start_loops()
+        except:
+            eh.exception(ErrorPriority.HIGHEST)
 
     def onPlayBackResumed(self):
-        log('onPlayBackResumed')
+        spam('Playback Resumed')
         self.PlaybackStatus = PlaybackStatus.PLAYING
+        try:
+            self.start_loops()
+        except:
+            eh.exception(ErrorPriority.HIGH)
 
+    def start_loops(self):
         self._t = Thread(target=self.tick_loop_trakt, args=())
         self._t.daemon = True
         self._t.start()
@@ -309,33 +347,45 @@ class Player(xbmc.Player):
         self._s.start()
 
     def onPlayBackStopped(self):
-        log('onPlayBackStopped')
-        self.scrobble_finished_episode()
+        spam('Playback Stopped')
+        try:
+            self.scrobble_finished_episode()
+        except:
+            eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.STOPPED
         self.refresh()
 
     def onPlayBackEnded(self):
-        log('onPlayBackEnded')
-        self.scrobble_finished_episode()
+        spam('Playback Ended')
+        try:
+            self.scrobble_finished_episode()
+        except:
+            eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.ENDED
         self.refresh()
 
     def onPlayBackPaused(self):
-        log('onPlayBackPaused')
+        spam('Playback Paused')
         self.PlaybackStatus = PlaybackStatus.PAUSED
-        scrobble_trakt(self.ep_id, 2, self.time, self.duration, self.is_movie)
-        if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-            from shoko_models.v2 import File
-            f = File(self.file_id)
-            f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
+        try:
+            scrobble_trakt(self.ep_id, 2, self.time, self.duration, self.is_movie)
+            if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
+                from shoko_models.v2 import File
+                f = File(self.file_id)
+                f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
+        except:
+            eh.exception(ErrorPriority.HIGH)
 
     def onPlayBackSeek(self, time_to_seek, seek_offset):
-        log('onPlayBackSeek with %s, %s' % (time_to_seek, seek_offset))
-        self.time = self.getTime()
-        if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-            from shoko_models.v2 import File
-            f = File(self.file_id)
-            f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
+        log('Playback Paused - time_to_seek=%s seek_offset=%s' % (time_to_seek, seek_offset))
+        try:
+            self.time = self.getTime()
+            if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
+                from shoko_models.v2 import File
+                f = File(self.file_id)
+                f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
+        except:
+            eh.exception(ErrorPriority.HIGH)
 
     def set_duration(self):
         if self.duration != 0:
@@ -370,21 +420,22 @@ class Player(xbmc.Player):
             return
 
     def tick_loop_update_time(self):
-        while self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
-            try:
-                # Leia seems to have a bug where calling self.getTotalTime() fails at times, so call it until it doesn't
-                self.set_duration()
-                self.time = self.getTime()
-                xbmc.sleep(500)
-            except:
-                pass  # while buffering
-        else:
-            log('update_time: not playing anything')
-            return
+        try:
+            while self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
+                try:
+                    # Leia seems to have a bug where calling self.getTotalTime() fails at times
+                    # Try until it succeeds
+                    self.set_duration()
+                    self.time = self.getTime()
+                    xbmc.sleep(500)
+                except:
+                    pass  # while buffering
+        except:
+            eh.exception(ErrorPriority.HIGHEST)
 
     def scrobble_finished_episode(self):
         if self.scrobble:
-            finished_episode(self.ep_id, self.time, self.duration)
+            finished_episode(self.ep_id, self.file_id, self.time, self.duration)
             scrobble_trakt(self.ep_id, 3, self.time, self.duration, self.is_movie)
 
         if self.is_transcoded:
@@ -393,5 +444,4 @@ class Player(xbmc.Player):
         self.Playlist = None
 
     def refresh(self):
-        wait = pyproxy.safe_int(plugin_addon.getSetting('refresh_wait'))
-        script_utils.arbiter(wait, 'Container.Refresh')
+        script_utils.arbiter(10, 'Container.Refresh')
