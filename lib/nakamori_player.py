@@ -65,8 +65,6 @@ def finished_episode(ep_id, file_id, current_time, total_time):
             pass
 
 
-
-
 def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     """
     Plays a file
@@ -318,7 +316,7 @@ class Player(xbmc.Player):
 
             # TODO get series and populate
             self.is_movie = False
-            if self.duration > 0:
+            if self.duration > 0 and self.scrobble:
                 scrobble_trakt(self.ep_id, 1, self.getTime(), self.duration, self.is_movie)
 
             self.start_loops()
@@ -367,25 +365,12 @@ class Player(xbmc.Player):
     def onPlayBackPaused(self):
         spam('Playback Paused')
         self.PlaybackStatus = PlaybackStatus.PAUSED
-        try:
-            scrobble_trakt(self.ep_id, 2, self.time, self.duration, self.is_movie)
-            if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-                from shoko_models.v2 import File
-                f = File(self.file_id)
-                f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
-        except:
-            eh.exception(ErrorPriority.HIGH)
+        self.scrobble_time()
 
     def onPlayBackSeek(self, time_to_seek, seek_offset):
         log('Playback Paused - time_to_seek=%s seek_offset=%s' % (time_to_seek, seek_offset))
-        try:
-            self.time = self.getTime()
-            if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-                from shoko_models.v2 import File
-                f = File(self.file_id)
-                f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
-        except:
-            eh.exception(ErrorPriority.HIGH)
+        self.time = self.getTime()
+        self.scrobble_time()
 
     def set_duration(self):
         if self.duration != 0:
@@ -394,6 +379,18 @@ class Player(xbmc.Player):
         if self.is_transcoded:
             duration = self.duration
         self.duration = duration
+
+    def scrobble_time(self):
+        if not self.scrobble:
+            return
+        try:
+            scrobble_trakt(self.ep_id, 2, self.time, self.duration, self.is_movie)
+            if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
+                from shoko_models.v2 import File
+                f = File(self.file_id)
+                f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
+        except:
+            eh.exception(ErrorPriority.HIGH)
 
     def tick_loop_trakt(self):
         if plugin_addon.getSetting('trakt_scrobble') != 'true':
