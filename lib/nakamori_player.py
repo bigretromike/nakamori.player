@@ -297,6 +297,14 @@ class Player(xbmc.Player):
         self.path = path
         self.scrobble = scrobble
 
+    def onAVStarted(self):
+        # Will be called when Kodi has a video or audiostream.
+        spam('onAVStarted')
+
+    def onAVChange(self):
+        # Will be called when Kodi has a video, audio or subtitle stream. Also happens when the stream changes.
+        spam('onAVChange')
+
     def onPlayBackStarted(self):
         spam('Playback Started')
         try:
