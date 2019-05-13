@@ -111,26 +111,27 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     if item is not None:
         if resume:
             item.resume()
-        file_url = f.url_for_player
+        file_url = f.url_for_player if f is not None else None
 
-    is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
+    if file_url is not None:
+        is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
 
-    player = Player()
-    player.feed(file_id, ep_id, f.duration, m3u8_url if is_transcoded else file_url, mark_as_watched)
+        player = Player()
+        player.feed(file_id, ep_id, f.duration, m3u8_url if is_transcoded else file_url, mark_as_watched)
 
-    try:
-        if is_transcoded:
-            player.play(item=m3u8_url)
-        else:
-            player.play(item=file_url, listitem=item)
+        try:
+            if is_transcoded:
+                player.play(item=m3u8_url)
+            else:
+                player.play(item=file_url, listitem=item)
 
-    except:
-        eh.exception(ErrorPriority.BLOCKING)
+        except:
+            eh.exception(ErrorPriority.BLOCKING)
 
-    # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
-    # TODO Move the instance to Service, so that it is never disposed
-    xbmc.sleep(int(plugin_addon.getSetting('player_sleep')))
-    return player_loop(player)
+        # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
+        # TODO Move the instance to Service, so that it is never disposed
+        xbmc.sleep(int(plugin_addon.getSetting('player_sleep')))
+        return player_loop(player)
 
 
 def player_loop(player):
