@@ -39,18 +39,25 @@ def scrobble_trakt(ep_id, status, current_time, total_time, movie):
 
 def finished_episode(ep_id, file_id, current_time, total_time):
     _finished = False
+    spam('finished_episode > ep_id = %s, file_id = %s, current_time = %s, total_time = %s' % (ep_id, file_id,
+                                                                                              current_time, total_time))
+    mark = float(plugin_addon.getSetting('watched_mark'))
     if plugin_addon.getSetting('external_player').lower() == 'false':
-        mark = float(plugin_addon.getSetting('watched_mark'))
-        mark /= 100
-        log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
-        if (total_time * mark) <= current_time:
-            _finished = True
+        pass
     else:
+        # mitigate the external player, skipping intro/outro/pv so we cut your setting in half
+        mark /= 2
+    mark /= 100
+    log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
+    if (total_time * mark) <= current_time:
+        _finished = True
+    # TODO this got broken for addons in Leia18, until this is somehow fixed we count time by hand (in loop)
+    # else:
         # external set position = 1.0 when it want to mark it as watched (based on configuration of external
-        if current_time > 0.0:
-            _finished = True
-        else:
-            log('Using an external player, but the settings are set to not mark as watched. Check advancedsettings.xml')
+        # if current_time > 0.0:
+        #    _finished = True
+        # else:
+        #   log('Using an external player, but the settings are set to not mark as watched. Check advancedsettings.xml')
 
     if _finished:
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
@@ -94,6 +101,7 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
             continue
         except:
             pass
+
     # now continue
     file_url = ''
 
@@ -259,7 +267,8 @@ class Player(xbmc.Player):
         spam('Player Initialized')
         xbmc.Player.__init__(self)
         self._t = None  # trakt thread
-        self._s = None  # sync thread
+        self._s = None  # shoko thread
+        self._u = None  # update thread
         self._details = None
         self.Playlist = None
         self.PlaybackStatus = 'Stopped'
@@ -274,16 +283,9 @@ class Player(xbmc.Player):
         self.time = 0
         self.path = ''
         self.scrobble = True
+        self.is_external = False
 
         self.CanControl = True
-        try:
-            is_external = str(kodi_proxy.external_player(self)).lower()
-            plugin_addon.setSetting(id='external_player', value=is_external)
-        except:
-            eh.exception(ErrorPriority.HIGH)
-        spam(self)
-        if kodi_proxy.external_player(self):
-            log('Using External Player')
 
     def reset(self):
         spam('Player reset')
@@ -301,6 +303,19 @@ class Player(xbmc.Player):
     def onAVStarted(self):
         # Will be called when Kodi has a video or audiostream.
         spam('onAVStarted')
+
+        # isExternalPlayer() ONLY works when isPlaying(), other than that it throw 0 always
+        # setting it before results in false setting
+        try:
+            is_external = str(kodi_proxy.external_player(self)).lower()
+            plugin_addon.setSetting(id='external_player', value=is_external)
+        except:
+            eh.exception(ErrorPriority.HIGH)
+        spam(self)
+
+        if kodi_proxy.external_player(self):
+            log('Using External Player')
+            self.is_external = True
 
     def onAVChange(self):
         # Will be called when Kodi has a video, audio or subtitle stream. Also happens when the stream changes.
@@ -341,22 +356,34 @@ class Player(xbmc.Player):
             eh.exception(ErrorPriority.HIGH)
 
     def start_loops(self):
+        try:
+            self._t.stop()
+        except:
+            pass
         self._t = Thread(target=self.tick_loop_trakt, args=())
         self._t.daemon = True
         self._t.start()
 
+        try:
+            self._s.stop()
+        except:
+            pass
         self._s = Thread(target=self.tick_loop_shoko, args=())
         self._s.daemon = True
         self._s.start()
 
-        self._s = Thread(target=self.tick_loop_update_time, args=())
-        self._s.daemon = True
-        self._s.start()
+        try:
+            self._u.stop()
+        except:
+            pass
+        self._u = Thread(target=self.tick_loop_update_time, args=())
+        self._u.daemon = True
+        self._u.start()
 
     def onPlayBackStopped(self):
         spam('Playback Stopped')
         try:
-            self.scrobble_finished_episode()
+            self.handle_finished_episode()
         except:
             eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.STOPPED
@@ -365,7 +392,7 @@ class Player(xbmc.Player):
     def onPlayBackEnded(self):
         spam('Playback Ended')
         try:
-            self.scrobble_finished_episode()
+            self.handle_finished_episode()
         except:
             eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.ENDED
@@ -432,17 +459,24 @@ class Player(xbmc.Player):
                     # Leia seems to have a bug where calling self.getTotalTime() fails at times
                     # Try until it succeeds
                     self.set_duration()
-                    self.time = self.getTime()
+
+                    if not self.is_external:
+                        self.time = self.getTime()
+                    else:
+                        self.time += 0.5
+                        # log('--------------> time is %s ' % self.getTime())
+
                     xbmc.sleep(500)
                 except:
                     pass  # while buffering
         except:
             eh.exception(ErrorPriority.HIGHEST)
 
-    def scrobble_finished_episode(self):
+    def handle_finished_episode(self):
         if self.scrobble:
-            finished_episode(self.ep_id, self.file_id, self.time, self.duration)
             scrobble_trakt(self.ep_id, 3, self.time, self.duration, self.is_movie)
+
+        finished_episode(self.ep_id, self.file_id, self.time, self.duration)
 
         if self.is_transcoded:
             pyproxy.get_json(trancode_url(self.file_id) + '/cancel')
