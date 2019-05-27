@@ -48,9 +48,11 @@ def finished_episode(ep_id, file_id, current_time, total_time):
         # mitigate the external player, skipping intro/outro/pv so we cut your setting in half
         mark /= 2
     mark /= 100
-    log('mark = %s * total = %s = %s < current = %s' % (mark, total_time, (total_time*mark), current_time))
+    spam('mark = %s * total (%s) = %s vs current = %s' % (mark, total_time, (total_time*mark), current_time))
     if (total_time * mark) <= current_time:
         _finished = True
+        log('Video current_time (%s) has passed watch mark (%s). Marking is as watched!' % (current_time, (total_time*mark)))
+
     # TODO this got broken for addons in Leia18, until this is somehow fixed we count time by hand (in loop)
     # else:
         # external set position = 1.0 when it want to mark it as watched (based on configuration of external
@@ -61,12 +63,24 @@ def finished_episode(ep_id, file_id, current_time, total_time):
 
     if _finished:
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
+            spam('vote_always, voting on episode')
             script_utils.vote_for_episode(ep_id)
+
         if ep_id != 0:
             from shoko_models.v2 import Episode
             ep = Episode(ep_id, build_full_object=False)
+            spam('mark as watched, episode')
             ep.set_watched_status(True)
-            # TODO we could do vote series here pretty easily
+
+            # vote on finished series
+            if plugin_addon.getSetting('vote_on_series') == 'true':
+                from shoko_models.v2 import get_series_for_episode
+                series = get_series_for_episode(ep_id)
+                # voting should be only when you really watch full series
+                spam('vote_on_series, mark: %s / %s' % (series.sizes.watched_episodes, series.sizes.total_episodes))
+                if series.sizes.watched_episodes - series.sizes.total_episodes == 0:
+                    script_utils.vote_for_series(series.id)
+
         elif file_id != 0:
             # file watched states
             pass
