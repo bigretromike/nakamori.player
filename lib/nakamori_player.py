@@ -125,6 +125,7 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
         ep.series_id = series.id
         ep.series_name = series.name
         item = ep.get_listitem()
+        item.setUniqueIDs({'shoko_eid': ep_id, 'shoko_aid': ep.series_id})
         f = ep.get_file_with_id(file_id)
     else:
         f = File(file_id, build_full_object=True)
