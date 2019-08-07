@@ -192,8 +192,13 @@ def process_transcoder(file_id, file_url, file_obj):
     video_url = trancode_url(file_id)
     post_data = '"file":"' + file_url + '"'
     try_count = 0
-    m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.m3u8'
-    ts_url = eigakan_host + '/api/video/' + str(file_id) + '/play0.ts'
+    is_dash = True
+    if is_dash:
+        m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.strm'
+        ts_url = eigakan_host + '/api/video/' + str(file_id) + '/chunk-stream0-00002.m4s'
+    else:
+        m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.m3u8'
+        ts_url = eigakan_host + '/api/video/' + str(file_id) + '/play0.ts'
 
     try:
         eigakan_data = pyproxy.get_json(eigakan_host + '/api/version')
@@ -203,6 +208,7 @@ def process_transcoder(file_id, file_url, file_obj):
         audio_stream_id = find_language_index(file_obj.audio_streams, plugin_addon.getSetting('audiolangEigakan'))
         sub_stream_id = find_language_index(file_obj.sub_streams, plugin_addon.getSetting('subEigakan'))
 
+        # please wait, Sending request to Transcode server...
         busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30165))
 
         if audio_stream_id != -1:
@@ -219,13 +225,14 @@ def process_transcoder(file_id, file_url, file_obj):
         xbmc.sleep(1000)
         busy.close()
 
+        # please wait, Waiting for response from Server...
         busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30164))
         while True:
+            if busy.iscanceled():
+                break
             if pyproxy.head(url_in=ts_url) is False:
                 x_try = int(plugin_addon.getSetting('tryEigakan'))
                 if try_count > x_try:
-                    break
-                if busy.iscanceled():
                     break
                 try_count += 1
                 busy.update(try_count)
@@ -236,13 +243,14 @@ def process_transcoder(file_id, file_url, file_obj):
 
         postpone_seconds = int(plugin_addon.getSetting('postponeEigakan'))
         if postpone_seconds > 0:
+            # please wait, Waiting given time (postpone)
             busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30166))
             while postpone_seconds > 0:
+                if busy.iscanceled():
+                    break
                 xbmc.sleep(1000)
                 postpone_seconds -= 1
                 busy.update(postpone_seconds)
-                if busy.iscanceled():
-                    break
             busy.close()
 
         if pyproxy.head(url_in=ts_url):
