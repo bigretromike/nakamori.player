@@ -9,6 +9,7 @@ from proxy.kodi_version_proxy import kodi_proxy
 from proxy.python_version_proxy import python_proxy as pyproxy
 import error_handler as eh
 from error_handler import spam, log, ErrorPriority
+import json
 
 busy = xbmcgui.DialogProgress()
 
@@ -143,7 +144,7 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
 
         try:
             if is_transcoded:
-                player.play(item=m3u8_url)
+                player.play(item=m3u8_url, startpos=0)
             else:
                 player.play(item=file_url, listitem=item)
 
@@ -191,12 +192,12 @@ def process_transcoder(file_id, file_url, file_obj):
 
     video_url = trancode_url(file_id)
     post_data = '"file":"' + file_url + '"'
-    try_count = 0
+
     is_dash = True
     end_url = eigakan_host + '/api/video/' + str(file_id) + '/end.eigakan'
     if is_dash:
         m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.strm'
-        ts_url = eigakan_host + '/api/video/' + str(file_id) + '/chunk-stream0-00002.m4s'
+        ts_url = eigakan_host + '/api/video/' + str(file_id) + '/chunk-stream0-00004.m4s'
     else:
         m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.m3u8'
         ts_url = eigakan_host + '/api/video/' + str(file_id) + '/play0.ts'
@@ -204,14 +205,16 @@ def process_transcoder(file_id, file_url, file_obj):
     try:
         eigakan_data = pyproxy.get_json(eigakan_host + '/api/version')
         if eigakan_data is None or 'eigakan' not in eigakan_data:
+            # TODO notification that Eigakan is not reachable, with question to disable this setting
             raise RuntimeError('Invalid response from Eigakan')
 
         if not pyproxy.head(url_in=end_url):
-            audio_stream_id = find_language_index(file_obj.audio_streams, plugin_addon.getSetting('audiolangEigakan'))
-            sub_stream_id = find_language_index(file_obj.sub_streams, plugin_addon.getSetting('subEigakan'))
 
             # please wait, Sending request to Transcode server...
             busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30165))
+
+            audio_stream_id = find_language_index(file_obj.audio_streams, plugin_addon.getSetting('audiolangEigakan'))
+            sub_stream_id = find_language_index(file_obj.sub_streams, plugin_addon.getSetting('subEigakan'))
 
             if audio_stream_id != -1:
                 post_data += ',"audio_stream":"' + str(audio_stream_id) + '"'
@@ -223,19 +226,102 @@ def process_transcoder(file_id, file_url, file_obj):
                 post_data += ',"audio_codec":"' + plugin_addon.getSetting('audioEigakan') + '"'
                 post_data += ',"video_bitrate":"' + plugin_addon.getSetting('vbitrateEigakan') + '"'
                 post_data += ',"x264_profile":"' + plugin_addon.getSetting('profileEigakan') + '"'
-            pyproxy.post_json(video_url, post_data)
+            pyproxy.post_json(video_url, post_data, custom_timeout=0.1)  # non blocking
             xbmc.sleep(1000)
             busy.close()
 
+            # region BUSY Dialog Hell
+            try_count = 0
+            found = False
+            # TODO lang fix
+            # please wait,waiting for being queued
+            busy.create(plugin_addon.getLocalizedString(30160), "Wiating to be added to queue...")
+            while True:
+                if busy.iscanceled():
+                    break
+                ask_for_queue = json.loads(pyproxy.get_json(eigakan_host + '/api/queue/status'))
+                if ask_for_queue is None:
+                    ask_for_queue = {}
+                # {"queue":{"queue":["6330","6330"],"subtitles":{"6330":{"status":"{'init'}"}},"videos":{}}}
+                x = ask_for_queue.get('queue', {'queue': ''}).get('queue', [])
+                for y in x:
+                    if int(y) == int(file_id):
+                        found = True
+                        break
+                if found:
+                    break
+                try_count += 1
+                busy.update(try_count)
+                xbmc.sleep(1000)
+            busy.close()
+
+            try_count = 0
+            found = False
+            # TODO lang fix
+            # plase wait, waiting for subs to be dumpe
+            busy.create(plugin_addon.getLocalizedString(30160), "Dumping subtitles...")
+            while True:
+                if busy.iscanceled():
+                    break
+                ask_for_subs = json.loads(pyproxy.get_json(eigakan_host + '/api/queue/%s' % file_id))
+                if ask_for_subs is None:
+                    ask_for_subs = {}
+                #x = ask_for_subs.get('queue', {"subtitles": {}}).get('subtitles', {})
+                y = ask_for_subs.get('queue', {"videos": {}}).get('videos', {})
+                #for z in x:
+                #    if int(z) == int(file_id):
+                for k in y:
+                    if int(k) == int(file_id):
+                        found = True
+                        break
+                    if found:
+                        break
+                #    if found:
+                #        break
+                if found:
+                    break
+                try_count += 1
+                busy.update(try_count)
+                xbmc.sleep(1000)
+            busy.close()
+
+            try_count = 0
+            found = False
+            # DO I WANT THIS ? maybe as a buffor ?
+            # TODO lang fix
+            # please waiti, witiign for starting transcode
+            busy.create(plugin_addon.getLocalizedString(30160), "Waiting for transcode to start...")
+            while True:
+                if busy.iscanceled():
+                    break
+                ask_for_subs = json.loads(pyproxy.get_json(eigakan_host + '/api/queue/%s' % file_id))
+                if ask_for_subs is None:
+                    ask_for_subs = {}
+                x = ask_for_subs.get('queue', {"videos": {}}).get('videos', {})
+                for k in x:
+                    if int(k) == int(file_id):
+                        percent = x[k].get('percent', 0)
+                        if int(percent) > 0:
+                            found = True
+                            xbmc.log('percent found of transcoding: %s' % percent, xbmc.LOGNOTICE)
+                            break
+                if found:
+                    break
+                try_count += 1
+                busy.update(try_count)
+                xbmc.sleep(1000)
+            busy.close()
+
+            try_count = 0
             # please wait, Waiting for response from Server...
             busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30164))
             while True:
                 if busy.iscanceled():
                     break
                 if pyproxy.head(url_in=ts_url) is False:
-                    x_try = int(plugin_addon.getSetting('tryEigakan'))
-                    if try_count > x_try:
-                        break
+                    # x_try = int(plugin_addon.getSetting('tryEigakan'))
+                    # if try_count > x_try:
+                    #     break
                     try_count += 1
                     busy.update(try_count)
                     xbmc.sleep(1000)
@@ -243,24 +329,29 @@ def process_transcoder(file_id, file_url, file_obj):
                     break
             busy.close()
 
-            postpone_seconds = int(plugin_addon.getSetting('postponeEigakan'))
-            if postpone_seconds > 0:
-                # please wait, Waiting given time (postpone)
-                busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30166))
-                while postpone_seconds > 0:
-                    if busy.iscanceled():
-                        break
-                    xbmc.sleep(1000)
-                    postpone_seconds -= 1
-                    busy.update(postpone_seconds)
-                busy.close()
+            # endregion
+
+            #postpone_seconds = int(plugin_addon.getSetting('postponeEigakan'))
+            #if postpone_seconds > 0:
+            #    # please wait, Waiting given time (postpone)
+            #    busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30166))
+            #    while postpone_seconds > 0:
+            #        if busy.iscanceled():
+            #            break
+            #        xbmc.sleep(1000)
+            #        postpone_seconds -= 1
+            #        busy.update(postpone_seconds)
+            #    busy.close()
 
         if pyproxy.head(url_in=ts_url):
             is_transcoded = True
 
     except:
         eh.exception(ErrorPriority.BLOCKING)
-        busy.close()
+        try:
+            busy.close()
+        except:
+            pass
 
     return is_transcoded, m3u8_url
 
