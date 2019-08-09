@@ -87,7 +87,11 @@ def finished_episode(ep_id, file_id, current_time, total_time):
             pass
 
 
-def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
+def direct_play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
+    play_video(file_id, ep_id, mark_as_watched, resume, force_direct_play=True)
+
+
+def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direct_play=False):
     """
     Plays a file
     :param file_id: file ID. It is needed to look up the file
@@ -137,7 +141,10 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
         file_url = f.url_for_player if f is not None else None
 
     if file_url is not None:
-        is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
+        is_transcoded = False
+        m3u8 = ''
+        if not force_direct_play:
+            is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
 
         player = Player()
         player.feed(file_id, ep_id, f.duration, m3u8_url if is_transcoded else file_url, mark_as_watched)
@@ -145,7 +152,6 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
         try:
             if is_transcoded:
                 player.play(item=m3u8_url)
-                xbmc.log("s---------------------------", xbmc.LOGNOTICE)
             else:
                 player.play(item=file_url, listitem=item)
 
