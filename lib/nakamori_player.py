@@ -144,7 +144,8 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
 
         try:
             if is_transcoded:
-                player.play(item=m3u8_url, startpos=0)
+                player.play(item=m3u8_url)
+                xbmc.log("s---------------------------", xbmc.LOGNOTICE)
             else:
                 player.play(item=file_url, listitem=item)
 
@@ -154,14 +155,23 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
         # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
         # TODO Move the instance to Service, so that it is never disposed
         xbmc.sleep(int(plugin_addon.getSetting('player_sleep')))
-        return player_loop(player)
+        return player_loop(player, is_transcoded)
 
 
-def player_loop(player):
+def player_loop(player, is_transcoded):
     # while player.isPlaying():
     #     xbmc.sleep(500)
     try:
         monitor = xbmc.Monitor()
+        # seek to beggining of stream hack https://github.com/peak3d/inputstream.adaptive/issues/94
+        if is_transcoded:
+            while not xbmc.Player().isPlayingVideo():
+                monitor.waitForAbort(0.25)
+            if xbmc.Player().isPlayingVideo():
+                xbmc.log("JSONRPC: seconds seek = " + str(0), xbmc.LOGNOTICE)
+                # xbmc.executebuiltin('Seek(0)')
+                xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Seek","params":{"playerid":1,"value":{"seconds":0}},"id":1}')
+
         while player.PlaybackStatus != PlaybackStatus.STOPPED and player.PlaybackStatus != PlaybackStatus.ENDED:
             xbmc.sleep(500)
         if player.PlaybackStatus == PlaybackStatus.STOPPED or player.PlaybackStatus == PlaybackStatus.ENDED:
