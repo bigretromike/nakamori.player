@@ -156,7 +156,6 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direc
         try:
             if is_transcoded:
                 player.play(item=m3u8_url)
-                xbmc.log("------------------ PLAY.PLAYER.TRANSOCDED", xbmc.LOGNOTICE)
             else:
                 player.play(item=file_url, listitem=item)
 
@@ -525,7 +524,6 @@ class Player(xbmc.Player):
         except:
             eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.STOPPED
-        # self.refresh()
 
     def onPlayBackEnded(self):
         spam('Playback Ended')
@@ -534,7 +532,6 @@ class Player(xbmc.Player):
         except:
             eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.ENDED
-        # self.refresh()
 
     def onPlayBackPaused(self):
         spam('Playback Paused')
