@@ -86,6 +86,9 @@ def finished_episode(ep_id, file_id, current_time, total_time):
             # file watched states
             pass
 
+        # refresh only when we really did watch episode, this way we wait until all action after watching are executed
+        script_utils.arbiter(10, 'Container.Refresh')
+
 
 def direct_play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     play_video(file_id, ep_id, mark_as_watched, resume, force_direct_play=True)
@@ -522,7 +525,7 @@ class Player(xbmc.Player):
         except:
             eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.STOPPED
-        self.refresh()
+        # self.refresh()
 
     def onPlayBackEnded(self):
         spam('Playback Ended')
@@ -531,7 +534,7 @@ class Player(xbmc.Player):
         except:
             eh.exception(ErrorPriority.HIGH)
         self.PlaybackStatus = PlaybackStatus.ENDED
-        self.refresh()
+        # self.refresh()
 
     def onPlayBackPaused(self):
         spam('Playback Paused')
@@ -617,6 +620,3 @@ class Player(xbmc.Player):
             pyproxy.get_json(trancode_url(self.file_id) + '/cancel')
 
         self.Playlist = None
-
-    def refresh(self):
-        script_utils.arbiter(10, 'Container.Refresh')
