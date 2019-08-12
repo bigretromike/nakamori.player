@@ -2,7 +2,7 @@
 import nakamori_utils.shoko_utils
 import xbmcgui
 from nakamori_utils.globalvars import *
-from nakamori_utils import script_utils
+from nakamori_utils import script_utils, kodi_utils
 from threading import Thread
 
 from proxy.kodi_version_proxy import kodi_proxy
@@ -61,9 +61,10 @@ def finished_episode(ep_id, file_id, current_time, total_time):
         #    _finished = True
         # else:
         #   log('Using an external player, but the settings are set to not mark as watched. Check advancedsettings.xml')
-
+    #_finished = False
     if _finished:
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
+            xbmc.log('------- vote always ----', xbmc.LOGNOTICE)
             spam('vote_always, voting on episode')
             script_utils.vote_for_episode(ep_id)
 
