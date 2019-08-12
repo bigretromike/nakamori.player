@@ -10,6 +10,8 @@ from proxy.python_version_proxy import python_proxy as pyproxy
 import error_handler as eh
 from error_handler import spam, log, ErrorPriority
 import json
+import xbmcplugin
+import sys
 
 busy = xbmcgui.DialogProgress()
 
@@ -61,7 +63,7 @@ def finished_episode(ep_id, file_id, current_time, total_time):
         #    _finished = True
         # else:
         #   log('Using an external player, but the settings are set to not mark as watched. Check advancedsettings.xml')
-    #_finished = False
+
     if _finished:
         if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
             xbmc.log('------- vote always ----', xbmc.LOGNOTICE)
@@ -147,19 +149,38 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direc
 
     if file_url is not None:
         is_transcoded = False
-        m3u8 = ''
+        m3u8_url = ''
         if not force_direct_play:
+            if 'smb://' in file_url:
+                file_url = f.remote_url_for_player
             is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
 
         player = Player()
         player.feed(file_id, ep_id, f.duration, m3u8_url if is_transcoded else file_url, mark_as_watched)
 
         try:
-            if is_transcoded:
-                player.play(item=m3u8_url)
-            else:
-                player.play(item=file_url, listitem=item)
+            item.setProperty('IsPlayable', 'true')
 
+            if is_transcoded:
+                #player.play(item=m3u8_url)
+                url_for_player = m3u8_url
+                item.setPath(url_for_player)
+                item.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                item.setProperty('inputstream.adaptive.manifest_type', 'mpd')
+                item.setMimeType('application/dash+xml')
+                item.setContentLookup(False)
+            else:
+                file_url = f.remote_url_for_player
+                #player.play(item=file_url, listitem=item)
+                url_for_player = f.remote_url_for_player  # file_url
+            xbmc.log('--------------> url_for_player: %s' % url_for_player, xbmc.LOGNOTICE)
+
+            handle = int(sys.argv[1])
+
+            if handle == -1:
+                player.play(item=url_for_player, listitem=item)
+            else:
+                xbmcplugin.setResolvedUrl(handle, True, item)
         except:
             eh.exception(ErrorPriority.BLOCKING)
 
@@ -173,7 +194,7 @@ def player_loop(player, is_transcoded):
     try:
         monitor = xbmc.Monitor()
 
-        # seek to beggining of stream hack https://github.com/peak3d/inputstream.adaptive/issues/94
+        # seek to beginning of stream :hack: https://github.com/peak3d/inputstream.adaptive/issues/94
         if is_transcoded:
             while not xbmc.Player().isPlayingVideo():
                 monitor.waitForAbort(0.25)
@@ -185,8 +206,10 @@ def player_loop(player, is_transcoded):
                     '{"jsonrpc":"2.0","method":"Player.Seek","params":{"playerid":1,"value":{"seconds":0}},"id":1}')
 
             xbmc.log("------------------ ------------------", xbmc.LOGNOTICE)
+
         while player.PlaybackStatus != PlaybackStatus.STOPPED and player.PlaybackStatus != PlaybackStatus.ENDED:
             xbmc.sleep(500)
+
         if player.PlaybackStatus == PlaybackStatus.STOPPED or player.PlaybackStatus == PlaybackStatus.ENDED:
             log('Playback Ended - Shutting Down: ', monitor.abortRequested())
             return -1
@@ -219,7 +242,7 @@ def process_transcoder(file_id, file_url, file_obj):
     is_dash = True
     end_url = eigakan_host + '/api/video/' + str(file_id) + '/end.eigakan'
     if is_dash:
-        m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.strm'
+        m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.mpd'
         ts_url = eigakan_host + '/api/video/' + str(file_id) + '/chunk-stream0-00004.m4s'
     else:
         m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.m3u8'
@@ -304,6 +327,10 @@ def process_transcoder(file_id, file_url, file_obj):
                 if found:
                     break
                 try_count += 1
+                if try_count >= 100:
+                    try_count = 0
+                    # TODO Lang Fix
+                    busy.update(try_count, "Looks like you using slow connection...")
                 busy.update(try_count)
                 xbmc.sleep(1000)
             busy.close()
@@ -331,6 +358,10 @@ def process_transcoder(file_id, file_url, file_obj):
                 if found:
                     break
                 try_count += 1
+                if try_count >= 100:
+                    try_count = 0
+                    # TODO Lang Fix
+                    busy.update(try_count, "Looks like you using very slow computer to transcode")
                 busy.update(try_count)
                 xbmc.sleep(1000)
             busy.close()
@@ -342,9 +373,6 @@ def process_transcoder(file_id, file_url, file_obj):
                 if busy.iscanceled():
                     break
                 if pyproxy.head(url_in=ts_url) is False:
-                    # x_try = int(plugin_addon.getSetting('tryEigakan'))
-                    # if try_count > x_try:
-                    #     break
                     try_count += 1
                     busy.update(try_count)
                     xbmc.sleep(1000)
@@ -353,18 +381,6 @@ def process_transcoder(file_id, file_url, file_obj):
             busy.close()
 
             # endregion
-
-            #postpone_seconds = int(plugin_addon.getSetting('postponeEigakan'))
-            #if postpone_seconds > 0:
-            #    # please wait, Waiting given time (postpone)
-            #    busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30166))
-            #    while postpone_seconds > 0:
-            #        if busy.iscanceled():
-            #            break
-            #        xbmc.sleep(1000)
-            #        postpone_seconds -= 1
-            #        busy.update(postpone_seconds)
-            #    busy.close()
 
         if pyproxy.head(url_in=ts_url):
             is_transcoded = True
