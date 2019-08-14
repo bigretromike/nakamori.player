@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import nakamori_utils.shoko_utils
 import xbmcgui
+
 from nakamori_utils.globalvars import *
 from nakamori_utils import script_utils, kodi_utils, eigakan_utils
 from threading import Thread
@@ -65,29 +66,7 @@ def finished_episode(ep_id, file_id, current_time, total_time):
         #    _finished = True
         # else:
         #   log('Using an external player, but the settings are set to not mark as watched. Check advancedsettings.xml')
-
-    if _finished:
-        if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
-            spam('vote_always, voting on episode')
-            script_utils.vote_for_episode(ep_id)
-
-        if ep_id != 0:
-            from shoko_models.v2 import Episode
-            ep = Episode(ep_id, build_full_object=False)
-            spam('mark as watched, episode')
-            ep.set_watched_status(True)
-
-            # vote on finished series
-            if plugin_addon.getSetting('vote_on_series') == 'true':
-                from shoko_models.v2 import get_series_for_episode
-                series = get_series_for_episode(ep_id)
-                # voting should be only when you really watch full series
-                spam('vote_on_series, mark: %s / %s' % (series.sizes.watched_episodes, series.sizes.total_episodes))
-                if series.sizes.watched_episodes - series.sizes.total_episodes == 0:
-                    script_utils.vote_for_series(series.id)
-
-        # refresh only when we really did watch episode, this way we wait until all action after watching are executed
-        script_utils.arbiter(10, 'Container.Refresh')
+    return _finished
 
 
 def transcode_play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
@@ -204,10 +183,10 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direc
         # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
         # TODO Move the instance to Service, so that it is never disposed
         xbmc.sleep(int(plugin_addon.getSetting('player_sleep')))
-        return player_loop(player, is_transcoded, is_finished)
+        return player_loop(player, is_transcoded, is_finished, ep_id)
 
 
-def player_loop(player, is_transcoded, is_finished):
+def player_loop(player, is_transcoded, is_transcode_finished, ep_id):
     try:
         monitor = xbmc.Monitor()
 
@@ -216,7 +195,7 @@ def player_loop(player, is_transcoded, is_finished):
             while not xbmc.Player().isPlayingVideo():
                 monitor.waitForAbort(0.25)
 
-            if not is_finished:
+            if not is_transcode_finished:
                 if xbmc.Player().isPlayingVideo():
                     log('Seek back - so the stream is from beginning')
                     # TODO part1: hack is temporary and not working in 100%
@@ -229,6 +208,38 @@ def player_loop(player, is_transcoded, is_finished):
 
         if player.PlaybackStatus == PlaybackStatus.STOPPED or player.PlaybackStatus == PlaybackStatus.ENDED:
             log('Playback Ended - Shutting Down: ', monitor.abortRequested())
+
+            if player.is_finished:
+                log('post-finish: start events')
+
+                if ep_id != 0:
+                    from shoko_models.v2 import Episode
+                    ep = Episode(ep_id, build_full_object=False)
+                    spam('mark as watched, episode')
+                    ep.set_watched_status(True)
+
+                while kodi_utils.is_dialog_active():
+                    xbmc.sleep(500)
+                # script_utils.arbiter(1, 'Container.Refresh')
+                kodi_utils.refresh()
+
+                while kodi_utils.is_dialog_active():
+                    xbmc.sleep(500)
+                kodi_utils.move_to_next()
+
+                if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
+                    spam('vote_always, voting on episode')
+                    script_utils.vote_for_episode(ep_id)
+
+                if int(ep_id) != 0 and plugin_addon.getSetting('vote_on_series') == 'true':
+                        from shoko_models.v2 import get_series_for_episode
+                        series = get_series_for_episode(ep_id)
+                        # voting should be only when you really watch full series
+                        spam('vote_on_series, mark: %s / %s' % (
+                        series.sizes.watched_episodes, series.sizes.total_episodes))
+                        if series.sizes.watched_episodes - series.sizes.total_episodes == 0:
+                            script_utils.vote_for_series(series.id)
+
             return -1
         else:
             log('Playback Ended - Playback status was not "Stopped" or "Ended". It was ', player.PlaybackStatus)
@@ -247,7 +258,6 @@ def get_client_settings():
             log('Client profile not found on Eigakan, sending new one...')
             kodi_utils.send_profile()
     return settings
-
 
 
 def process_transcoder(file_id, file_url, force_transcode_play=False):
@@ -456,6 +466,7 @@ class Player(xbmc.Player):
         self.path = ''
         self.scrobble = True
         self.is_external = False
+        self.is_finished = False
 
         self.CanControl = True
 
@@ -601,31 +612,30 @@ class Player(xbmc.Player):
         if not self.scrobble:
             return
         while True:
-            if self.PlaybackStatus == PlaybackStatus.PLAYING:
+            if self.PlaybackStatus == PlaybackStatus.PLAYING and self.isPlayingVideo():
                 try:
                     scrobble_trakt(self.ep_id, 1, self.time, self.duration, self.is_movie)
-                    xbmc.sleep(2500)
                 except:
                     pass
+                xbmc.sleep(2500)
 
     def tick_loop_shoko(self):
         if not self.scrobble:
             return
         while True:
-            if self.PlaybackStatus == PlaybackStatus.PLAYING:
+            if self.PlaybackStatus == PlaybackStatus.PLAYING and self.isPlayingVideo():
                 try:
                     if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
                         from shoko_models.v2 import File
                         f = File(self.file_id)
                         f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
-                        xbmc.sleep(2500)
                 except:
                     pass
-
+                xbmc.sleep(2500)
 
     def tick_loop_update_time(self):
         while True:
-            if self.PlaybackStatus == PlaybackStatus.PLAYING:
+            if self.PlaybackStatus == PlaybackStatus.PLAYING and self.isPlayingVideo():
                 try:
                     # Leia seems to have a bug where calling self.getTotalTime() fails at times
                     # Try until it succeeds
@@ -635,19 +645,18 @@ class Player(xbmc.Player):
                         self.time = self.getTime()
                     else:
                         self.time += 1
-
-                    xbmc.sleep(1000) # wait 1sec
                 except:
                     pass  # while buffering
+                xbmc.sleep(1000)  # wait 1sec
 
     def handle_finished_episode(self):
         log('-------> handle_finished_episode <----- ')
+        self.Playlist = None
+
         if self.scrobble:
             scrobble_trakt(self.ep_id, 3, self.time, self.duration, self.is_movie)
-
-        finished_episode(self.ep_id, self.file_id, self.time, self.duration)
 
         if self.is_transcoded:
             pyproxy.get_json(trancode_url(self.file_id) + '/cancel')
 
-        self.Playlist = None
+        self.is_finished = finished_episode(self.ep_id, self.file_id, self.time, self.duration)
