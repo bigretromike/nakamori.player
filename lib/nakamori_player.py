@@ -18,11 +18,13 @@ import sys
 busy = xbmcgui.DialogProgress()
 clientid = nakamori_utils.kodi_utils.get_device_id()
 
+
 class PlaybackStatus(object):
     PLAYING = 'Playing'
     PAUSED = 'Paused'
     STOPPED = 'Stopped'
     ENDED = 'Ended'
+
 
 eigakan_url = plugin_addon.getSetting('ipEigakan')
 eigakan_port = plugin_addon.getSetting('portEigakan')
@@ -274,7 +276,7 @@ def process_transcoder(file_id, file_url, force_transcode_play=False):
     subs_type = ''
     is_finished = False
 
-    if plugin_addon.getSetting('enableEigakan') != 'true' and force_transcode_play == False:
+    if plugin_addon.getSetting('enableEigakan') != 'true' and not force_transcode_play:
         return is_transcoded, m3u8_url, subs_type, is_finished
 
     video_url = trancode_url(file_id)
@@ -332,7 +334,6 @@ def process_transcoder(file_id, file_url, force_transcode_play=False):
                 try_count += 1
                 busy.update(try_count)
                 xbmc.sleep(1000)
-            #busy.close()
 
             try_count = 0
             found = False
@@ -357,11 +358,9 @@ def process_transcoder(file_id, file_url, force_transcode_play=False):
                 try_count += 1
                 if try_count >= 100:
                     try_count = 0
-                    # TODO Lang Fix
-                    busy.update(try_count, "Looks like you using slow connection...")
+                    busy.update(try_count, plugin_addon.getLocalizedString(30218))
                 busy.update(try_count)
                 xbmc.sleep(1000)
-            #busy.close()
 
             try_count = 0
             found = False
@@ -379,18 +378,16 @@ def process_transcoder(file_id, file_url, force_transcode_play=False):
                         percent = x[k].get('percent', 0)
                         if int(percent) > 0:
                             found = True
-                            xbmc.log('percent found of transcoding: %s' % percent, xbmc.LOGNOTICE)
+                            log('percent found of transcoding: %s' % percent)
                             break
                 if found:
                     break
                 try_count += 1
                 if try_count >= 100:
                     try_count = 0
-                    # TODO Lang Fix
-                    busy.update(try_count, "Looks like you using very slow computer to transcode")
+                    busy.update(try_count, plugin_addon.getLocalizedString(30218))
                 busy.update(try_count)
                 xbmc.sleep(1000)
-            #busy.close()
 
             try_count = 0
             # please wait, Waiting for response from Server...
@@ -650,7 +647,6 @@ class Player(xbmc.Player):
                 xbmc.sleep(1000)  # wait 1sec
 
     def handle_finished_episode(self):
-        log('-------> handle_finished_episode <----- ')
         self.Playlist = None
 
         if self.scrobble:
