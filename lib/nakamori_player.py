@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import nakamori_utils.shoko_utils
+import xbmc
 import xbmcgui
+import xbmcplugin
 
 from nakamori_utils.globalvars import *
 from nakamori_utils import script_utils, kodi_utils, eigakan_utils
@@ -12,7 +14,6 @@ from proxy.python_version_proxy import http_error as http_error
 import error_handler as eh
 from error_handler import spam, log, ErrorPriority
 import json
-import xbmcplugin
 import sys
 
 busy = xbmcgui.DialogProgress()
@@ -220,14 +221,15 @@ def player_loop(player, is_transcoded, is_transcode_finished, ep_id):
                     spam('mark as watched, episode')
                     ep.set_watched_status(True)
 
+                # wait till directory is loaded
                 while kodi_utils.is_dialog_active():
                     xbmc.sleep(500)
-                # script_utils.arbiter(1, 'Container.Refresh')
+                # refresh it, so it moves onto next item and the mark watched is refreshed
                 kodi_utils.refresh()
 
+                # wait till it load again
                 while kodi_utils.is_dialog_active():
                     xbmc.sleep(500)
-                kodi_utils.move_to_next()
 
                 if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
                     spam('vote_always, voting on episode')
