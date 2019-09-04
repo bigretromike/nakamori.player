@@ -80,7 +80,7 @@ def direct_play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     play_video(file_id, ep_id, mark_as_watched, resume, force_direct_play=True)
 
 
-def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direct_play=False, force_transcode_play=False):
+def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direct_play=False, force_transcode_play=False, party_mode=False):
     """
     Plays a file
     :param file_id: file ID. It is needed to look up the file
@@ -186,10 +186,10 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direc
         # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
         # TODO Move the instance to Service, so that it is never disposed
         xbmc.sleep(int(plugin_addon.getSetting('player_sleep')))
-        return player_loop(player, is_transcoded, is_finished, ep_id)
+        return player_loop(player, is_transcoded, is_finished, ep_id, party_mode)
 
 
-def player_loop(player, is_transcoded, is_transcode_finished, ep_id):
+def player_loop(player, is_transcoded, is_transcode_finished, ep_id, party_mode):
     try:
         monitor = xbmc.Monitor()
 
@@ -231,11 +231,11 @@ def player_loop(player, is_transcoded, is_transcode_finished, ep_id):
                 while kodi_utils.is_dialog_active():
                     xbmc.sleep(500)
 
-                if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true':
+                if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true' and not party_mode:
                     spam('vote_always, voting on episode')
                     script_utils.vote_for_episode(ep_id)
 
-                if int(ep_id) != 0 and plugin_addon.getSetting('vote_on_series') == 'true':
+                if int(ep_id) != 0 and plugin_addon.getSetting('vote_on_series') == 'true' and not party_mode:
                         from shoko_models.v2 import get_series_for_episode
                         series = get_series_for_episode(ep_id)
                         # voting should be only when you really watch full series
@@ -466,6 +466,7 @@ class Player(xbmc.Player):
         self.scrobble = True
         self.is_external = False
         self.is_finished = False
+        self.party_mode = False
 
         self.CanControl = True
 
