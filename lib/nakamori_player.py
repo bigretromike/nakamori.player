@@ -1,17 +1,23 @@
 # -*- coding: utf-8 -*-
 import nakamori_utils.shoko_utils
+import xbmc
 import xbmcgui
+import xbmcplugin
+
 from nakamori_utils.globalvars import *
-from nakamori_utils import script_utils, kodi_utils
+from nakamori_utils import script_utils, kodi_utils, eigakan_utils
 from threading import Thread
 
 from proxy.kodi_version_proxy import kodi_proxy
 from proxy.python_version_proxy import python_proxy as pyproxy
+from proxy.python_version_proxy import http_error as http_error
 import error_handler as eh
 from error_handler import spam, log, ErrorPriority
 import json
+import sys
 
 busy = xbmcgui.DialogProgress()
+clientid = nakamori_utils.kodi_utils.get_device_id()
 
 
 class PlaybackStatus(object):
@@ -25,9 +31,11 @@ eigakan_url = plugin_addon.getSetting('ipEigakan')
 eigakan_port = plugin_addon.getSetting('portEigakan')
 eigakan_host = 'http://' + eigakan_url + ':' + eigakan_port
 
+magic_chunk = 'chunk-stream0-00003.m4s'
+
 
 def trancode_url(file_id):
-    video_url = eigakan_host + '/api/transcode/' + str(file_id)
+    video_url = eigakan_host + '/api/transcode/%s/%s' % (clientid, file_id)
     return video_url
 
 
@@ -90,11 +98,15 @@ def finished_episode(ep_id, file_id, current_time, total_time):
         script_utils.arbiter(10, 'Container.Refresh')
 
 
+def transcode_play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
+    play_video(file_id, ep_id, mark_as_watched, resume, force_transcode_play=True)
+
+
 def direct_play_video(file_id, ep_id=0, mark_as_watched=True, resume=False):
     play_video(file_id, ep_id, mark_as_watched, resume, force_direct_play=True)
 
 
-def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direct_play=False):
+def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direct_play=False, force_transcode_play=False, party_mode=False):
     """
     Plays a file
     :param file_id: file ID. It is needed to look up the file
@@ -102,9 +114,12 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direc
     :param mark_as_watched: should we mark it after playback
     :param resume: should we auto-resume
     :param force_direct_play: force direct play
+    :param force_transcode_play: force transcoding file
     :return: True if successfully playing
     """
 
+    eh.spam('Processing play_video %s %s %s %s %s %s' % (file_id, ep_id, mark_as_watched, resume, force_direct_play, force_transcode_play))
+	
     from shoko_models.v2 import Episode, File, get_series_for_episode
 
     # check if we're already playing something
@@ -141,52 +156,120 @@ def play_video(file_id, ep_id=0, mark_as_watched=True, resume=False, force_direc
 
     if item is not None:
         if resume:
+            # TODO looks like this does nothing...
             item.resume()
+        else:
+            item.setProperty('ResumeTime', '0')
         file_url = f.url_for_player if f is not None else None
 
     if file_url is not None:
         is_transcoded = False
-        m3u8 = ''
+        m3u8_url = ''
+        subs_extension = ''
+        is_finished = False
         if not force_direct_play:
-            is_transcoded, m3u8_url = process_transcoder(file_id, file_url, f)
+            if 'smb://' in file_url:
+                file_url = f.remote_url_for_player
+            is_transcoded, m3u8_url, subs_extension, is_finished = process_transcoder(file_id, file_url, force_transcode_play)
 
         player = Player()
         player.feed(file_id, ep_id, f.duration, m3u8_url if is_transcoded else file_url, mark_as_watched)
 
         try:
-            if is_transcoded:
-                player.play(item=m3u8_url)
-            else:
-                player.play(item=file_url, listitem=item)
+            item.setProperty('IsPlayable', 'true')
 
+            if is_transcoded:
+                #player.play(item=m3u8_url)
+                url_for_player = m3u8_url
+                item.setPath(url_for_player)
+                item.setProperty('inputstreamaddon', 'inputstream.adaptive')
+                item.setProperty('inputstream.adaptive.manifest_type', 'mpd')
+                item.setMimeType('application/dash+xml')
+                item.setContentLookup(False)
+
+                # TODO maybe extract all subs and include them ?
+                subs_url = eigakan_host + '/api/video/%s/%s/subs.%s' % (clientid, file_id, subs_extension)
+                if pyproxy.head(url_in=subs_url):
+                    item.setSubtitles([subs_url,])
+                    item.addStreamInfo('subtitle', {'language': 'Default',})
+
+            else:
+                #file_url = f.remote_url_for_player
+                #player.play(item=file_url, listitem=item)
+                url_for_player = f.url_for_player  # file_url
+                item.setPath(url_for_player)
+
+            handle = int(sys.argv[1])
+
+            if handle == -1:
+                player.play(item=url_for_player, listitem=item)
+            else:
+                # thanks to anxdpanic for pointing in right direction
+                xbmcplugin.setResolvedUrl(handle, True, item)
         except:
             eh.exception(ErrorPriority.BLOCKING)
 
         # leave player alive so we can handle onPlayBackStopped/onPlayBackEnded
         # TODO Move the instance to Service, so that it is never disposed
         xbmc.sleep(int(plugin_addon.getSetting('player_sleep')))
-        return player_loop(player, is_transcoded)
+        return player_loop(player, is_transcoded, is_finished, ep_id, party_mode)
 
 
-def player_loop(player, is_transcoded):
+def player_loop(player, is_transcoded, is_transcode_finished, ep_id, party_mode):
     try:
         monitor = xbmc.Monitor()
 
-        # seek to beggining of stream hack https://github.com/peak3d/inputstream.adaptive/issues/94
+        # seek to beginning of stream :hack: https://github.com/peak3d/inputstream.adaptive/issues/94
         if is_transcoded:
             while not xbmc.Player().isPlayingVideo():
                 monitor.waitForAbort(0.25)
 
-            if xbmc.Player().isPlayingVideo():
-                xbmc.log("JSONRPC: seconds seek = " + str(0), xbmc.LOGNOTICE)
-                # xbmc.executebuiltin('Seek(0)')
-                xbmc.executeJSONRPC(
-                    '{"jsonrpc":"2.0","method":"Player.Seek","params":{"playerid":1,"value":{"seconds":0}},"id":1}')
+            if not is_transcode_finished:
+                if xbmc.Player().isPlayingVideo():
+                    log('Seek back - so the stream is from beginning')
+                    # TODO part1: hack is temporary and not working in 100%
+                    # TODO part2: (with small segments + fast cpu, you wont start from 1st segment)
+                    #xbmc.executebuiltin('Seek(-60)')
+                    xbmc.executeJSONRPC('{"jsonrpc":"2.0","method":"Player.Seek","params":{"playerid":1,"value":{"seconds":0}},"id":1}')
 
         while player.PlaybackStatus != PlaybackStatus.STOPPED and player.PlaybackStatus != PlaybackStatus.ENDED:
             xbmc.sleep(500)
+
         if player.PlaybackStatus == PlaybackStatus.STOPPED or player.PlaybackStatus == PlaybackStatus.ENDED:
             log('Playback Ended - Shutting Down: ', monitor.abortRequested())
+
+            if player.is_finished:
+                log('post-finish: start events')
+
+                if ep_id != 0:
+                    from shoko_models.v2 import Episode
+                    ep = Episode(ep_id, build_full_object=False)
+                    spam('mark as watched, episode')
+                    ep.set_watched_status(True)
+
+                # wait till directory is loaded
+                while kodi_utils.is_dialog_active():
+                    xbmc.sleep(500)
+                # refresh it, so it moves onto next item and the mark watched is refreshed
+                kodi_utils.refresh()
+
+                # wait till it load again
+                while kodi_utils.is_dialog_active():
+                    xbmc.sleep(500)
+
+                if int(ep_id) != 0 and plugin_addon.getSetting('vote_always') == 'true' and not party_mode:
+                    spam('vote_always, voting on episode')
+                    script_utils.vote_for_episode(ep_id)
+
+                if int(ep_id) != 0 and plugin_addon.getSetting('vote_on_series') == 'true' and not party_mode:
+                        from shoko_models.v2 import get_series_for_episode
+                        series = get_series_for_episode(ep_id)
+                        # voting should be only when you really watch full series
+                        spam('vote_on_series, mark: %s / %s' % (
+                        series.sizes.watched_episodes, series.sizes.total_episodes))
+                        if series.sizes.watched_episodes - series.sizes.total_episodes == 0:
+                            script_utils.vote_for_series(series.id)
+
             return -1
         else:
             log('Playback Ended - Playback status was not "Stopped" or "Ended". It was ', player.PlaybackStatus)
@@ -196,122 +279,121 @@ def player_loop(player, is_transcoded):
         return -1
 
 
-def process_transcoder(file_id, file_url, file_obj):
+def get_client_settings():
+    settings = {}
+    try:
+        settings = json.loads(pyproxy.get_json(eigakan_host + '/api/clientid/%s' % clientid))
+    except http_error as er:
+        if er.code == 404:
+            log('Client profile not found on Eigakan, sending new one...')
+            kodi_utils.send_profile()
+    return settings
+
+
+def process_transcoder(file_id, file_url, force_transcode_play=False):
     """
 
     :param file_id:
     :param file_url:
-    :type file_url: str
-    :param file_obj:
-    :type file_obj: File
+    :param force_transcode_play: force transcode
     :return:
     """
-    m3u8_url = ''
+
     is_transcoded = False
-    if plugin_addon.getSetting('enableEigakan') != 'true':
-        return is_transcoded, m3u8_url
+    m3u8_url = ''
+    subs_type = ''
+    is_finished = False
+
+    if plugin_addon.getSetting('enableEigakan') != 'true' and not force_transcode_play:
+        return is_transcoded, m3u8_url, subs_type, is_finished
 
     video_url = trancode_url(file_id)
     post_data = '"file":"' + file_url + '"'
 
     is_dash = True
-    end_url = eigakan_host + '/api/video/' + str(file_id) + '/end.eigakan'
+    end_url = eigakan_host + '/api/video/%s/%s/end.eigakan' % (clientid, file_id)
     if is_dash:
-        m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.strm'
-        ts_url = eigakan_host + '/api/video/' + str(file_id) + '/chunk-stream0-00004.m4s'
+        m3u8_url = eigakan_host + '/api/video/%s/%s/play.mpd'% (clientid, file_id)
+        ts_url = eigakan_host + '/api/video/%s/%s/%s'% (clientid, file_id, magic_chunk)
     else:
-        m3u8_url = eigakan_host + '/api/video/' + str(file_id) + '/play.m3u8'
-        ts_url = eigakan_host + '/api/video/' + str(file_id) + '/play0.ts'
+        m3u8_url = eigakan_host + '/api/video/%s/%s/play.m3u8'% (clientid, file_id)
+        ts_url = eigakan_host + '/api/video/%s/%s/play0.ts'% (clientid, file_id)
 
     try:
-        eigakan_data = pyproxy.get_json(eigakan_host + '/api/version')
-        if eigakan_data is None or 'eigakan' not in eigakan_data:
-            # TODO notification that Eigakan is not reachable, with question to disable this setting
-            raise RuntimeError('Invalid response from Eigakan')
+        kodi_utils.check_eigakan()
 
-        if not pyproxy.head(url_in=end_url):
+        # server is alive so send profile of device we didn't before
+        if plugin_addon.getSetting('eigakan_handshake') == 'false':
+            kodi_utils.send_profile()
+        settings = get_client_settings()
 
-            # please wait, Sending request to Transcode server...
-            busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30165))
-
-            audio_stream_id = find_language_index(file_obj.audio_streams, plugin_addon.getSetting('audiolangEigakan'))
-            sub_stream_id = find_language_index(file_obj.sub_streams, plugin_addon.getSetting('subEigakan'))
-
-            if audio_stream_id != -1:
-                post_data += ',"audio_stream":"' + str(audio_stream_id) + '"'
-            if sub_stream_id != -1:
-                post_data += ',"subtitles_stream":"' + str(sub_stream_id) + '"'
-
-            if plugin_addon.getSetting('advEigakan') == 'true':
-                post_data += ',"resolution":"' + plugin_addon.getSetting('resolutionEigakan') + '"'
-                post_data += ',"audio_codec":"' + plugin_addon.getSetting('audioEigakan') + '"'
-                post_data += ',"video_bitrate":"' + plugin_addon.getSetting('vbitrateEigakan') + '"'
-                post_data += ',"x264_profile":"' + plugin_addon.getSetting('profileEigakan') + '"'
-            pyproxy.post_json(video_url, post_data, custom_timeout=0.1)  # non blocking
-            xbmc.sleep(1000)
+        # check if file is already transcoded
+        is_finished = pyproxy.head(url_in=end_url)
+        if not is_finished:
+            # let's probe file, maybe we already know which streams we want
+            busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30177))
+            audio_streams, subs_streams = eigakan_utils.probe_file(file_id, file_url)
             busy.close()
 
+            # pick streams that are preferred via profile on eigakan
+            a_index, s_index, subs_type = eigakan_utils.pick_best_streams(audio_streams, subs_streams)
+
             # region BUSY Dialog Hell
+            # please wait, Sending request to Transcode server...
+            busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30165))
+            if a_index > -1:
+                post_data += ',"audio":"%s"' % a_index
+            if s_index > -1:
+                post_data += ',"subtitles":"%s"' % s_index
+            pyproxy.post_json(video_url, post_data, custom_timeout=0.1)  # non blocking
+            xbmc.sleep(1000)
+            # busy.close()
+
             try_count = 0
             found = False
-            # TODO lang fix
             # please wait,waiting for being queued
-            busy.create(plugin_addon.getLocalizedString(30160), "Wiating to be added to queue...")
+            busy.update(0, plugin_addon.getLocalizedString(30192))
             while True:
                 if busy.iscanceled():
                     break
-                ask_for_queue = json.loads(pyproxy.get_json(eigakan_host + '/api/queue/status'))
-                if ask_for_queue is None:
-                    ask_for_queue = {}
-                # {"queue":{"queue":["6330","6330"],"subtitles":{"6330":{"status":"{'init'}"}},"videos":{}}}
-                x = ask_for_queue.get('queue', {'queue': ''}).get('queue', [])
-                for y in x:
-                    if int(y) == int(file_id):
-                        found = True
-                        break
-                if found:
+                if eigakan_utils.is_fileid_added_to_transcoder(file_id):
                     break
+
                 try_count += 1
                 busy.update(try_count)
                 xbmc.sleep(1000)
-            busy.close()
 
             try_count = 0
             found = False
-            # TODO lang fix
-            # plase wait, waiting for subs to be dumpe
-            busy.create(plugin_addon.getLocalizedString(30160), "Dumping subtitles...")
+            # plase wait, waiting for subs to be dump
+            busy.update(try_count, plugin_addon.getLocalizedString(30205))
             while True:
                 if busy.iscanceled():
                     break
                 ask_for_subs = json.loads(pyproxy.get_json(eigakan_host + '/api/queue/%s' % file_id))
                 if ask_for_subs is None:
                     ask_for_subs = {}
-                #x = ask_for_subs.get('queue', {"subtitles": {}}).get('subtitles', {})
                 y = ask_for_subs.get('queue', {"videos": {}}).get('videos', {})
-                #for z in x:
-                #    if int(z) == int(file_id):
+
                 for k in y:
                     if int(k) == int(file_id):
                         found = True
                         break
                     if found:
                         break
-                #    if found:
-                #        break
                 if found:
                     break
                 try_count += 1
+                if try_count >= 100:
+                    try_count = 0
+                    busy.update(try_count, plugin_addon.getLocalizedString(30218))
                 busy.update(try_count)
                 xbmc.sleep(1000)
-            busy.close()
 
             try_count = 0
             found = False
-            # DO I WANT THIS ? maybe as a buffor ?
-            # TODO lang fix
-            # please waiti, witiign for starting transcode
-            busy.create(plugin_addon.getLocalizedString(30160), "Waiting for transcode to start...")
+            # please waiting, waiting for starting transcode
+            busy.update(try_count, plugin_addon.getLocalizedString(30206))
             while True:
                 if busy.iscanceled():
                     break
@@ -324,25 +406,24 @@ def process_transcoder(file_id, file_url, file_obj):
                         percent = x[k].get('percent', 0)
                         if int(percent) > 0:
                             found = True
-                            xbmc.log('percent found of transcoding: %s' % percent, xbmc.LOGNOTICE)
+                            log('percent found of transcoding: %s' % percent)
                             break
                 if found:
                     break
                 try_count += 1
+                if try_count >= 100:
+                    try_count = 0
+                    busy.update(try_count, plugin_addon.getLocalizedString(30218))
                 busy.update(try_count)
                 xbmc.sleep(1000)
-            busy.close()
 
             try_count = 0
             # please wait, Waiting for response from Server...
-            busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30164))
+            busy.update(try_count, plugin_addon.getLocalizedString(30164))
             while True:
                 if busy.iscanceled():
                     break
                 if pyproxy.head(url_in=ts_url) is False:
-                    # x_try = int(plugin_addon.getSetting('tryEigakan'))
-                    # if try_count > x_try:
-                    #     break
                     try_count += 1
                     busy.update(try_count)
                     xbmc.sleep(1000)
@@ -351,18 +432,6 @@ def process_transcoder(file_id, file_url, file_obj):
             busy.close()
 
             # endregion
-
-            #postpone_seconds = int(plugin_addon.getSetting('postponeEigakan'))
-            #if postpone_seconds > 0:
-            #    # please wait, Waiting given time (postpone)
-            #    busy.create(plugin_addon.getLocalizedString(30160), plugin_addon.getLocalizedString(30166))
-            #    while postpone_seconds > 0:
-            #        if busy.iscanceled():
-            #            break
-            #        xbmc.sleep(1000)
-            #        postpone_seconds -= 1
-            #        busy.update(postpone_seconds)
-            #    busy.close()
 
         if pyproxy.head(url_in=ts_url):
             is_transcoded = True
@@ -374,27 +443,29 @@ def process_transcoder(file_id, file_url, file_obj):
         except:
             pass
 
-    return is_transcoded, m3u8_url
+    return is_transcoded, m3u8_url, subs_type, is_finished
 
 
-def find_language_index(streams, setting):
-    stream_index = -1
-    stream_id = -1
-    for code in setting.split(','):
-        for stream in streams:
-            stream_index += 1
-            if code in streams[stream].get('Language', '').lower() != '':
-                stream_id = stream_index
-                break
-            if code in streams[stream].get('LanguageCode', '').lower() != '':
-                stream_id = stream_index
-                break
-            if code in streams[stream].get('Title', '').lower() != '':
-                stream_id = stream_index
-                break
-        if stream_id != -1:
-            break
-    return stream_id
+# TODO this could be reusable and used before probing ?
+# TODO part2: check if data in shoko are populated correctly + send in api (still)
+#def find_language_index(streams, setting):
+#    stream_index = -1
+#    stream_id = -1
+#    for code in setting.split(','):
+#        for stream in streams:
+#            stream_index += 1
+#            if code in streams[stream].get('Language', '').lower() != '':
+#                stream_id = stream_index
+#                break
+#            if code in streams[stream].get('LanguageCode', '').lower() != '':
+#                stream_id = stream_index
+#                break
+#            if code in streams[stream].get('Title', '').lower() != '':
+#                stream_id = stream_index
+#                break
+#        if stream_id != -1:
+#            break
+#    return stream_id
 
 
 # noinspection PyUnusedFunction
@@ -407,9 +478,9 @@ class Player(xbmc.Player):
         self._u = None  # update thread
         self._details = None
         self.Playlist = None
-        self.PlaybackStatus = 'Stopped'
-        self.LoopStatus = 'None'
-        self.Shuffle = False
+        self.PlaybackStatus = PlaybackStatus.STOPPED
+        # self.LoopStatus = 'None'
+        # self.Shuffle = False
         self.is_transcoded = False
         self.is_movie = None
         self.file_id = 0
@@ -420,6 +491,8 @@ class Player(xbmc.Player):
         self.path = ''
         self.scrobble = True
         self.is_external = False
+        self.is_finished = False
+        self.party_mode = False
 
         self.CanControl = True
 
@@ -437,7 +510,7 @@ class Player(xbmc.Player):
         self.scrobble = scrobble
 
     def onAVStarted(self):
-        # Will be called when Kodi has a video or audiostream.
+        # Will be called when Kodi has a video or audiostream, before playing file
         spam('onAVStarted')
 
         # isExternalPlayer() ONLY works when isPlaying(), other than that it throw 0 always
@@ -470,11 +543,10 @@ class Player(xbmc.Player):
             self.PlaybackStatus = PlaybackStatus.PLAYING
             # we are making the player global, so if a stop is issued, then Playing will change
             while not self.isPlaying() and self.PlaybackStatus == PlaybackStatus.PLAYING:
-                xbmc.sleep(100)
-            if self.PlaybackStatus != PlaybackStatus.PLAYING:
-                return
+                xbmc.sleep(250)
 
-            # TODO get series and populate
+            # TODO get series and populate info so we know if its movie or not
+            # TODO maybe we could read trakt_id from shoko,
             self.is_movie = False
             if self.duration > 0 and self.scrobble:
                 scrobble_trakt(self.ep_id, 1, self.getTime(), self.duration, self.is_movie)
@@ -492,6 +564,7 @@ class Player(xbmc.Player):
             eh.exception(ErrorPriority.HIGH)
 
     def start_loops(self):
+        spam('start_loops')
         try:
             self._t.stop()
         except:
@@ -543,52 +616,52 @@ class Player(xbmc.Player):
         self.scrobble_time()
 
     def set_duration(self):
-        if self.duration != 0:
-            return
-        duration = int(self.getTotalTime())
-        if self.is_transcoded:
-            duration = self.duration
-        self.duration = duration
+        try:
+            if self.duration != 0:
+                return
+            duration = int(self.getTotalTime())
+            if self.is_transcoded:
+                duration = self.duration
+            self.duration = duration
+        except:
+            pass
 
     def scrobble_time(self):
         if not self.scrobble:
             return
         try:
             scrobble_trakt(self.ep_id, 2, self.time, self.duration, self.is_movie)
-            if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-                from shoko_models.v2 import File
-                f = File(self.file_id)
-                f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
         except:
             eh.exception(ErrorPriority.HIGH)
 
     def tick_loop_trakt(self):
-        if plugin_addon.getSetting('trakt_scrobble') != 'true':
+        if not self.scrobble:
             return
-        while self.scrobble and self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
-            scrobble_trakt(self.ep_id, 1, self.time, self.duration, self.is_movie)
-            xbmc.sleep(2500)
-        else:
-            log('trakt_thread: not playing anything')
-            return
+        while True:
+            if self.PlaybackStatus == PlaybackStatus.PLAYING and self.isPlayingVideo():
+                try:
+                    scrobble_trakt(self.ep_id, 1, self.time, self.duration, self.is_movie)
+                except:
+                    pass
+                xbmc.sleep(2500)
 
     def tick_loop_shoko(self):
-        while self.scrobble and self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
-            try:
-                if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
-                    from shoko_models.v2 import File
-                    f = File(self.file_id)
-                    f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
-                    xbmc.sleep(2500)
-            except:
-                pass  # while buffering
-        else:
-            log('sync_thread: not playing anything')
+        if not self.scrobble:
             return
+        while True:
+            if self.PlaybackStatus == PlaybackStatus.PLAYING and self.isPlayingVideo():
+                try:
+                    if plugin_addon.getSetting('file_resume') == 'true' and self.time > 10:
+                        from shoko_models.v2 import File
+                        f = File(self.file_id)
+                        f.set_resume_time(kodi_proxy.duration_from_kodi(self.time))
+                except:
+                    pass
+                xbmc.sleep(2500)
 
     def tick_loop_update_time(self):
-        try:
-            while self.isPlayingVideo() and self.PlaybackStatus == PlaybackStatus.PLAYING:
+        while True:
+            if self.PlaybackStatus == PlaybackStatus.PLAYING and self.isPlayingVideo():
                 try:
                     # Leia seems to have a bug where calling self.getTotalTime() fails at times
                     # Try until it succeeds
@@ -597,22 +670,18 @@ class Player(xbmc.Player):
                     if not self.is_external:
                         self.time = self.getTime()
                     else:
-                        self.time += 0.5
-                        # log('--------------> time is %s ' % self.getTime())
-
-                    xbmc.sleep(500)
+                        self.time += 1
                 except:
                     pass  # while buffering
-        except:
-            eh.exception(ErrorPriority.HIGHEST)
+                xbmc.sleep(1000)  # wait 1sec
 
     def handle_finished_episode(self):
+        self.Playlist = None
+
         if self.scrobble:
             scrobble_trakt(self.ep_id, 3, self.time, self.duration, self.is_movie)
-
-        finished_episode(self.ep_id, self.file_id, self.time, self.duration)
 
         if self.is_transcoded:
             pyproxy.get_json(trancode_url(self.file_id) + '/cancel')
 
-        self.Playlist = None
+        self.is_finished = finished_episode(self.ep_id, self.file_id, self.time, self.duration)
